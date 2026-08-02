@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Hexagon Puzzle</title>
+<style>
+  :root{
+    --bg:#1b1d24; --panel:#242730; --panel2:#2c3039;
+    --ink:#eef1f6; --muted:#9aa3b2; --accent:#f0a020; --good:#57c785; --bad:#e5533c;
+    --line:#3a3f4b;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  #app{display:flex;flex-direction:column;height:100%;}
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px;}
+  header .sub{color:var(--muted);font-size:12px;}
+  .spacer{flex:1;}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    padding:7px 12px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;
+    transition:background .15s,border-color .15s;user-select:none;white-space:nowrap;}
+  .btn:hover{background:#333844;border-color:#4a505e;}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:var(--accent);color:#20160a;border-color:var(--accent);}
+  .btn.primary:hover{background:#ffb733;}
+  .pill{color:var(--muted);font-size:12px;padding:6px 10px;background:var(--panel2);
+    border-radius:20px;border:1px solid var(--line);}
+  .pill b{color:var(--ink);}
+  #stage{flex:1;position:relative;min-height:0;min-width:0;}
+  canvas{position:absolute;inset:0;display:block;width:100%;height:100%;touch-action:none;}
+  .hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);
+    background:rgba(20,22,28,.82);border:1px solid var(--line);border-radius:10px;
+    padding:8px 14px;font-size:12.5px;color:var(--muted);pointer-events:none;
+    display:flex;gap:16px;white-space:nowrap;backdrop-filter:blur(4px);}
+  .hint kbd{background:#3a3f4b;border-radius:4px;padding:1px 6px;color:var(--ink);
+    font-family:inherit;font-size:11px;font-weight:700;}
+  #win{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(15,17,22,.72);backdrop-filter:blur(3px);z-index:5;}
+  #win .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:30px 40px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  #win h2{margin:0 0 6px;font-size:28px;}
+  #win p{margin:0 0 18px;color:var(--muted);}
+  /* solution badge */
+  .badge{background:linear-gradient(135deg,#2c3140,#20232c);border:1px solid var(--line);
+    border-radius:14px;padding:14px 20px;margin:4px 0 16px;display:inline-block;min-width:240px;}
+  .badge .lab{font-size:12px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;}
+  .badge .num{font-size:30px;font-weight:800;color:var(--accent);line-height:1.1;margin:2px 0;}
+  .badge .num small{font-size:15px;color:var(--muted);font-weight:600;}
+  .badge .tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;}
+  .badge .tag.new{background:#1e3a2a;color:var(--good);}
+  .badge .tag.old{background:#3a3320;color:#e0b050;}
+  /* collection modal */
+  #collection{position:absolute;inset:0;display:none;flex-direction:column;z-index:6;
+    background:rgba(12,14,18,.9);backdrop-filter:blur(4px);}
+  #collection .top{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);}
+  #collection h2{margin:0;font-size:18px;}
+  #collection .top .sub{color:var(--muted);font-size:13px;}
+  #gallery{flex:1;overflow-y:auto;padding:16px;display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;align-content:start;}
+  .sol{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center;}
+  .sol canvas{width:100%;height:auto;display:block;border-radius:6px;}
+  .sol .sn{font-weight:800;color:var(--accent);font-size:15px;margin-top:6px;}
+  .sol .sd{color:var(--muted);font-size:11px;}
+  #gallery .empty{color:var(--muted);grid-column:1/-1;text-align:center;padding:40px;}
+  @media (max-width:640px){ header h1{font-size:14px;} .hint{display:none;} .btn{padding:6px 9px;font-size:12px;} }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>⬡ Hexagon Puzzle</h1>
+    <span class="sub">fit every piece into the hexagon</span>
+    <span class="spacer"></span>
+    <span class="pill">Placed <b id="count">0</b>/<b id="total">0</b></span>
+    <button class="btn" id="rotL" title="Rotate left">⟲</button>
+    <button class="btn" id="rotR" title="Rotate right">⟳</button>
+    <button class="btn" id="flip" title="Flip">⇋ Flip</button>
+    <button class="btn" id="shuffle">Shuffle</button>
+    <button class="btn" id="reset">Reset</button>
+    <button class="btn" id="solve">Solve</button>
+    <button class="btn" id="solutions">🏅 My Solutions (<b id="solCount">0</b>)</button>
+  </header>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="hint">
+      <span><kbd>drag</kbd> move piece</span>
+      <span><kbd>R</kbd>/<kbd>right-click</kbd> rotate</span>
+      <span><kbd>F</kbd> / <kbd>double-click</kbd> flip</span>
+    </div>
+    <div id="win"><div class="card">
+      <h2>🎉 Solved!</h2>
+      <div class="badge" id="badge"></div>
+      <p id="wintime">Nicely done.</p>
+      <button class="btn primary" id="again">Play again</button>
+      <button class="btn" id="viewAll">View my solutions</button>
+    </div></div>
+    <div id="collection">
+      <div class="top">
+        <h2>🏅 My Solutions</h2>
+        <span class="sub" id="colSub"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn" id="colClose">Close</button>
+      </div>
+      <div id="gallery"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PIECE_DATA = [{"id":"P0","color":"#F20C0C","solution":[[2,0],[3,-1],[3,0],[3,1],[4,0]]},{"id":"P1","color":"#0000FF","solution":[[0,-4],[0,-3],[1,-4],[1,-3],[1,-2]]},{"id":"P2","color":"#00FF00","solution":[[2,-1],[3,-2],[4,-2],[4,-1]]},{"id":"P3","color":"#0CC4F2","solution":[[-4,0],[-4,1],[-4,2],[-4,3]]},{"id":"P4","color":"#F20CAD","solution":[[-2,-2],[-2,-1],[-2,0],[-1,0],[0,-1]]},{"id":"P5","color":"#FFD632","solution":[[0,1],[0,2],[1,0],[1,1],[1,2]]},{"id":"P6","color":"#0CF2AD","solution":[[-4,4],[-3,3],[-3,4]]},{"id":"P7","color":"#327AFF","solution":[[-3,-1],[-3,0],[-3,1],[-2,1]]},{"id":"P8","color":"#E500FF","solution":[[-3,2],[-2,2],[-2,3],[-1,1]]},{"id":"P9","color":"#F43D6B","solution":[[0,4],[1,3],[2,1],[2,2]]},{"id":"P10","color":"#CBFF00","solution":[[3,-4],[3,-3],[4,-4],[4,-3]]},{"id":"P11","color":"#FF8E32","solution":[[-2,4],[-1,2],[-1,3],[-1,4],[0,3]]},{"id":"P12","color":"#00FEFF","solution":[[0,0],[1,-1],[2,-4],[2,-3],[2,-2]]},{"id":"P13","color":"#3D46F4","solution":[[-1,-3],[-1,-2],[-1,-1],[0,-2]]}];
+const BOARD_RADIUS = 4;
+
+/* ---------- hex math (pointy-top, axial q,r ; cube x=q, z=r, y=-x-z) ---------- */
+const SQRT3 = Math.sqrt(3);
+function axialToPixel(q, r, size){ return { x: size*SQRT3*(q + r/2), y: size*1.5*r }; }
+function pixelToAxial(x, y, size){
+  const q = (SQRT3/3 * x - 1/3 * y) / size;
+  const r = (2/3 * y) / size;
+  return hexRound(q, r);
+}
+function hexRound(q, r){
+  let x=q, z=r, y=-x-z;
+  let rx=Math.round(x), ry=Math.round(y), rz=Math.round(z);
+  const dx=Math.abs(rx-x), dy=Math.abs(ry-y), dz=Math.abs(rz-z);
+  if(dx>dy && dx>dz) rx=-ry-rz; else if(dy>dz) ry=-rx-rz; else rz=-rx-ry;
+  return { q: rx, r: rz };
+}
+// transforms on a cell offset [q,r]
+function rot60(cell){ // 60 deg clockwise: (x,y,z)->(-z,-x,-y)
+  const x=cell[0], z=cell[1], y=-x-z;
+  const nx=-z, nz=-y; // ny=-x
+  return [nx, nz];
+}
+function reflect(cell){ // swap x<->z : (q,r)->(r,q)
+  return [cell[1], cell[0]];
+}
+function transformCells(base, rot, flip){
+  return base.map(c=>{
+    let cell = flip ? reflect(c) : [c[0], c[1]];
+    for(let i=0;i<rot;i++) cell = rot60(cell);
+    return cell;
+  });
+}
+
+/* ---------- board cells ---------- */
+const boardCells = [];
+const boardSet = new Set();
+for(let q=-BOARD_RADIUS;q<=BOARD_RADIUS;q++)
+  for(let r=-BOARD_RADIUS;r<=BOARD_RADIUS;r++)
+    if(Math.max(Math.abs(q),Math.abs(r),Math.abs(q+r))<=BOARD_RADIUS){
+      boardCells.push([q,r]); boardSet.add(q+","+r);
+    }
+
+/* ---------- game state ---------- */
+let pieces = [];        // {id,color,base,rot,flip,placed,anchor:{q,r}|null,tray:{x,y}}
+let occ = new Map();    // "q,r" -> piece index (board occupancy)
+let drag = null;        // {idx, mx,my, offsetOK, moved}
+let selected = -1;
+let startTime = null, solvedFlag = false;
+
+function makePieces(){
+  pieces = PIECE_DATA.map(p=>({
+    id:p.id, color:p.color, base:p.solution.map(c=>[c[0],c[1]]),
+    rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}
+  }));
+  occ.clear();
+}
+// cells of a piece given its current orientation, anchored so cell[0] sits at `anchor`
+function orientedOffsets(p){
+  const t = transformCells(p.base, p.rot, p.flip);
+  const o = t[0];
+  return t.map(c=>[c[0]-o[0], c[1]-o[1]]); // first cell at (0,0)
+}
+function placedCells(p){
+  const offs = orientedOffsets(p);
+  return offs.map(o=>[p.anchor.q+o[0], p.anchor.r+o[1]]);
+}
+
+/* ---------- layout ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let DPR=1, W=0, H=0;
+let boardSize=30, boardOx=0, boardOy=0;   // board hex size + pixel origin (center)
+let boardCircumR=0;                        // board circumradius in px
+let traySize=18;                           // scattered-piece hex size
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  // board centered; leave a margin ring around it for the scattered pieces
+  boardOx = W/2; boardOy = H/2;
+  const D = Math.min(W,H)*0.56;   // hexagon fits inside a centered box of side D
+  boardSize = Math.max(8, Math.min(D/(SQRT3*(2*BOARD_RADIUS+1)), D/(3*BOARD_RADIUS+2)));
+  boardCircumR = 0;
+  for(const [q,r] of boardCells){ const p=axialToPixel(q,r,boardSize); boardCircumR=Math.max(boardCircumR,Math.hypot(p.x,p.y)); }
+  boardCircumR += boardSize;      // include hex extent
+  layoutTray();
+  draw();
+}
+
+// max bounding box of a piece over ALL 12 orientations, at hex size 1
+function pieceExtentAll(p){
+  let mw=1, mh=1;
+  for(let f=0;f<2;f++) for(let rot=0;rot<6;rot++){
+    const t=transformCells(p.base,rot,!!f);
+    const o0=t[0]; let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+    for(const c of t){
+      const px=axialToPixel(c[0]-o0[0],c[1]-o0[1],1);
+      minx=Math.min(minx,px.x-1); maxx=Math.max(maxx,px.x+1);
+      miny=Math.min(miny,px.y-SQRT3/2); maxy=Math.max(maxy,px.y+SQRT3/2);
+    }
+    mw=Math.max(mw,maxx-minx); mh=Math.max(mh,maxy-miny);
+  }
+  return {w:mw,h:mh};
+}
+
+// point at arc-length `d` along a rectangle centred at (cx,cy) with half-extents ax,ay
+function rectPoint(d, cx, cy, ax, ay){
+  const w=2*ax, h=2*ay, per=2*(w+h);
+  d=((d%per)+per)%per;
+  if(d<w) return [cx-ax+d, cy-ay];      // top  L->R
+  d-=w; if(d<h) return [cx+ax, cy-ay+d]; // right T->B
+  d-=h; if(d<w) return [cx+ax-d, cy+ay]; // bottom R->L
+  d-=w; return [cx-ax, cy+ay-d];         // left B->T
+}
+// Scatter every piece around the OUTSIDE of the board, on a ring hugging the canvas
+// edges/corners. Slots are fixed per piece index, so pieces don't jump as others are
+// placed; the size is picked so all pieces stay fully on-screen and clear of the board.
+function layoutTray(){
+  const N = pieces.length;
+  // worst-case piece extent over ALL orientations, so rotating/flipping never overflows
+  let maxExt=1;
+  for(const p of pieces){ const e=pieceExtentAll(p); maxExt=Math.max(maxExt,e.w,e.h); }
+  let chosen=null;
+  for(let size=boardSize*1.15; size>=5; size*=0.94){
+    const halfMax=(maxExt*size)/2 + size*0.35;   // half slot + padding
+    const margin=halfMax+4;
+    const ax=W/2-margin, ay=H/2-margin;
+    if(ax<=10||ay<=10) continue;
+    const per=2*(2*ax+2*ay);
+    if(per/N < 2.05*halfMax) continue;                 // neighbours would touch
+    if(Math.min(ax,ay)-halfMax < boardCircumR+4) continue; // would overlap the board
+    chosen={size,ax,ay,per}; break;
+  }
+  if(!chosen){ const s=6,ax=Math.max(11,W/2-20),ay=Math.max(11,H/2-20); chosen={size:s,ax,ay,per:2*(2*ax+2*ay)}; }
+  traySize=chosen.size;
+  const {ax,ay,per}=chosen;
+  pieces.forEach((p,i)=>{
+    const [px,py]=rectPoint((i+0.5)/N*per, boardOx, boardOy, ax, ay);
+    const bb=pieceBBox(p,traySize);
+    p.tray.x = px - (bb.minx+bb.maxx)/2;   // centre piece on its ring slot
+    p.tray.y = py - (bb.miny+bb.maxy)/2;
+    p._laid=true;
+  });
+}
+function pieceBBox(p, size){
+  const offs = orientedOffsets(p);
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  for(const o of offs){
+    const c = axialToPixel(o[0],o[1],size);
+    minx=Math.min(minx,c.x-size); maxx=Math.max(maxx,c.x+size);
+    miny=Math.min(miny,c.y-size*SQRT3/2); maxy=Math.max(maxy,c.y+size*SQRT3/2);
+  }
+  return {minx,miny,maxx,maxy,w:maxx-minx,h:maxy-miny};
+}
+
+/* ---------- drawing ---------- */
+function hexPath(cx, cy, size){
+  ctx.beginPath();
+  for(let i=0;i<6;i++){
+    const a = Math.PI/180*(30+60*i); // pointy-top
+    const x=cx+size*Math.cos(a), y=cy+size*Math.sin(a);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+}
+function drawCellHex(cx,cy,size,fill,stroke,lw){
+  hexPath(cx,cy,size*0.96);
+  if(fill){ ctx.fillStyle=fill; ctx.fill(); }
+  if(stroke){ ctx.lineWidth=lw||1.5; ctx.strokeStyle=stroke; ctx.stroke(); }
+}
+function shade(hex, amt){ // amt -1..1 darken/lighten
+  const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  const f=amt<0?0:255, t=Math.abs(amt);
+  r=Math.round(r+(f-r)*t); g=Math.round(g+(f-g)*t); b=Math.round(b+(f-b)*t);
+  return `rgb(${r},${g},${b})`;
+}
+function drawPieceHexes(cells, cx, cy, size, color, alpha, highlight){
+  ctx.save();
+  ctx.globalAlpha = alpha==null?1:alpha;
+  // soft drop shadow for depth
+  for(const c of cells){
+    const p=axialToPixel(c[0],c[1],size);
+    drawCellHex(cx+p.x, cy+p.y, size, shade(color,-0.28), null);
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = alpha==null?1:alpha;
+  for(const c of cells){
+    const p=axialToPixel(c[0],c[1],size);
+    drawCellHex(cx+p.x, cy+p.y-size*0.07, size, color, shade(color,0.30), Math.max(1,size*0.05));
+  }
+  if(highlight){
+    ctx.globalAlpha=1;
+    for(const c of cells){
+      const p=axialToPixel(c[0],c[1],size);
+      drawCellHex(cx+p.x, cy+p.y-size*0.07, size, null, highlight, Math.max(2,size*0.12));
+    }
+  }
+  ctx.restore();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // board empty cells
+  for(const [q,r] of boardCells){
+    const p=axialToPixel(q,r,boardSize);
+    drawCellHex(boardOx+p.x, boardOy+p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
+  }
+
+  // placed pieces
+  pieces.forEach((p,idx)=>{
+    if(!p.placed || (drag && drag.idx===idx)) return;
+    const cells = placedCells(p).map(c=>c); // absolute
+    const rel = cells.map(c=>[c[0],c[1]]);
+    // draw at board origin using absolute coords
+    drawPieceHexes(rel, boardOx, boardOy, boardSize, p.color, 1, selected===idx?'#ffffff':null);
+  });
+
+  // tray pieces
+  pieces.forEach((p,idx)=>{
+    if(p.placed || (drag && drag.idx===idx)) return;
+    const offs = orientedOffsets(p);
+    drawPieceHexes(offs, p.tray.x, p.tray.y, traySize, p.color, 1, selected===idx?'#ffffff':null);
+  });
+
+  // dragging piece (drawn last, on top)
+  if(drag){
+    const p=pieces[drag.idx];
+    const offs = orientedOffsets(p);
+    if(drag.snapCell){
+      // preview snapped on board
+      const cells = offs.map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
+      const good = drag.valid;
+      drawPieceHexes(cells, boardOx, boardOy, boardSize, p.color, good?1:0.85,
+        good?'#ffffff':'#e5533c');
+    } else {
+      drawPieceHexes(offs, drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
+    }
+  }
+}
+
+/* ---------- interaction ---------- */
+function evtPos(e){
+  const rect=canvas.getBoundingClientRect();
+  const t = e.touches? e.touches[0] : e;
+  return { x:t.clientX-rect.left, y:t.clientY-rect.top };
+}
+// find piece under a point. Returns {idx, kind:'board'|'tray'} or null
+function pick(px,py){
+  // check dragging-priority: placed pieces on board first if over board, else tray
+  // tray pieces
+  for(let i=pieces.length-1;i>=0;i--){
+    const p=pieces[i];
+    if(p.placed) continue;
+    const offs=orientedOffsets(p);
+    const local=pixelToAxial(px-p.tray.x, py-p.tray.y, traySize);
+    if(offs.some(o=>o[0]===local.q&&o[1]===local.r)) return {idx:i,kind:'tray'};
+  }
+  // placed pieces
+  const cell=pixelToAxial(px-boardOx, py-boardOy, boardSize);
+  const key=cell.q+","+cell.r;
+  if(occ.has(key)) return {idx:occ.get(key), kind:'board'};
+  return null;
+}
+
+function removeFromBoard(idx){
+  const p=pieces[idx];
+  if(!p.placed) return;
+  for(const c of placedCells(p)) occ.delete(c[0]+","+c[1]);
+  p.placed=false; p.anchor=null;
+}
+function tryPlace(idx, cellQ, cellR){
+  const p=pieces[idx];
+  const offs=orientedOffsets(p);
+  const cells=offs.map(o=>[cellQ+o[0], cellR+o[1]]);
+  for(const c of cells){
+    const k=c[0]+","+c[1];
+    if(!boardSet.has(k)) return false;
+    if(occ.has(k) && occ.get(k)!==idx) return false;
+  }
+  for(const c of cells) occ.set(c[0]+","+c[1], idx);
+  p.placed=true; p.anchor={q:cellQ,r:cellR};
+  return true;
+}
+function validAt(idx, cellQ, cellR){
+  const p=pieces[idx];
+  const offs=orientedOffsets(p);
+  for(const o of offs){
+    const q=cellQ+o[0], r=cellR+o[1], k=q+","+r;
+    if(!boardSet.has(k)) return false;
+    if(occ.has(k) && occ.get(k)!==idx) return false;
+  }
+  return true;
+}
+
+function onDown(e){
+  if(solvedFlag) return;
+  const {x,y}=evtPos(e);
+  const hit=pick(x,y);
+  if(!hit){ selected=-1; draw(); return; }
+  if(startTime===null) startTime=Date.now();
+  const idx=hit.idx;
+  selected=idx;
+  const wasPlaced=pieces[idx].placed;
+  const origAnchor=wasPlaced?{q:pieces[idx].anchor.q,r:pieces[idx].anchor.r}:null;
+  if(hit.kind==='board') removeFromBoard(idx);
+  // anchor grab: keep piece under cursor, cell[0] follows pointer
+  drag={idx, mx:x, my:y, snapCell:null, valid:false, moved:false, downX:x, downY:y,
+        wasPlaced, origAnchor};
+  updateSnap();
+  draw();
+  e.preventDefault();
+}
+function onMove(e){
+  if(!drag) return;
+  const {x,y}=evtPos(e);
+  if(Math.hypot(x-drag.downX,y-drag.downY)>4) drag.moved=true;
+  drag.mx=x; drag.my=y;
+  updateSnap();
+  draw();
+  e.preventDefault();
+}
+function updateSnap(){
+  // if pointer is near/over the board, snap the grabbed (first) cell to nearest board cell
+  const cell=pixelToAxial(drag.mx-boardOx, drag.my-boardOy, boardSize);
+  const overBoard = boardSet.has(cell.q+","+cell.r) ||
+     Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.02;
+  if(overBoard){
+    drag.snapCell={q:cell.q,r:cell.r};
+    drag.valid=validAt(drag.idx, cell.q, cell.r);
+  } else {
+    drag.snapCell=null; drag.valid=false;
+  }
+}
+function onUp(e){
+  if(!drag) return;
+  const idx=drag.idx;
+  if(!drag.moved){
+    // treat as a click/select: restore to where it came from, don't place/move
+    if(drag.wasPlaced) tryPlace(idx, drag.origAnchor.q, drag.origAnchor.r);
+    else { pieces[idx].placed=false; pieces[idx].anchor=null; }
+  } else if(drag.snapCell && drag.valid){
+    tryPlace(idx, drag.snapCell.q, drag.snapCell.r);
+  } else {
+    // dropped somewhere invalid -> send to tray
+    pieces[idx].placed=false; pieces[idx].anchor=null; pieces[idx]._laid=false;
+  }
+  drag=null;
+  layoutTray(true);
+  updateCount();
+  checkWin();
+  draw();
+  e && e.preventDefault();
+}
+
+/* rotate/flip the active piece (dragging or selected) */
+function activeIdx(){ return drag? drag.idx : selected; }
+function rotateActive(dir){
+  const i=activeIdx(); if(i<0) return;
+  const p=pieces[i];
+  const wasPlaced=p.placed;
+  if(wasPlaced) removeFromBoard(i);
+  p.rot=((p.rot + (dir>0?1:5))%6);
+  if(wasPlaced){
+    // try to place back at same anchor, else drop to tray
+    if(!(p.anchor && false)){}
+  }
+  if(drag) updateSnap();
+  else if(wasPlaced){
+    // attempt to keep on board at old anchor
+  }
+  layoutTray(true);
+  draw();
+}
+function flipActive(){
+  const i=activeIdx(); if(i<0) return;
+  const p=pieces[i];
+  if(p.placed) removeFromBoard(i);
+  p.flip=!p.flip;
+  if(drag) updateSnap();
+  layoutTray(true);
+  draw();
+}
+
+/* double click / dbl tap => flip the piece under the cursor */
+function onDbl(e){
+  const {x,y}=evtPos(e);
+  const hit=pick(x,y);
+  if(!hit) return;
+  selected=hit.idx;
+  flipActive();      // flips the selected piece (pops off board if it no longer fits)
+  updateCount();
+  e && e.preventDefault && e.preventDefault();
+}
+
+/* ---------- buttons & win ---------- */
+function updateCount(){
+  const n=pieces.filter(p=>p.placed).length;
+  document.getElementById('count').textContent=n;
+  document.getElementById('total').textContent=pieces.length;
+}
+/* ---------- solution numbering & collection ---------- */
+const TOTAL_SOLUTIONS = 817984;   // exact count of distinct fillings of this piece set
+function cyrb53(str, seed){        // fast 53-bit string hash
+  let h1=0xdeadbeef^(seed||0), h2=0x41c6ce57^(seed||0);
+  for(let i=0,ch;i<str.length;i++){ ch=str.charCodeAt(i);
+    h1=Math.imul(h1^ch,2654435761); h2=Math.imul(h2^ch,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507); h1^=Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507); h2^=Math.imul(h1^(h1>>>13),3266489909);
+  return 4294967296*(2097151&h2)+(h1>>>0);
+}
+function solutionKey(){ // stable string: which piece fills each board cell
+  return boardCells.map(([q,r])=> pieces[occ.get(q+","+r)].id ).join('|');
+}
+function currentLayout(){ return pieces.map(p=>({color:p.color, cells:placedCells(p)})); }
+function loadCollection(){ try{ return JSON.parse(localStorage.getItem('hexSolvedV1')||'{}'); }catch(e){ return {}; } }
+function saveCollection(c){ try{ localStorage.setItem('hexSolvedV1', JSON.stringify(c)); }catch(e){} }
+function updateSolCount(){ document.getElementById('solCount').textContent=Object.keys(loadCollection()).length; }
+
+function checkWin(){
+  if(occ.size===boardCells.length && pieces.every(p=>p.placed)){
+    solvedFlag=true;
+    const secs=startTime?Math.round((Date.now()-startTime)/1000):0;
+    const mm=String(Math.floor(secs/60)).padStart(2,'0'), ss=String(secs%60).padStart(2,'0');
+    // assign this exact filling its solution number
+    const h=cyrb53(solutionKey());
+    const id=h.toString(36);
+    const num=(h % TOTAL_SOLUTIONS)+1;
+    const col=loadCollection();
+    const isNew=!(id in col);
+    if(isNew){ col[id]={num, date:Date.now(), layout:currentLayout()}; saveCollection(col); }
+    const found=Object.keys(col).length;
+    document.getElementById('badge').innerHTML=
+      '<div class="lab">Solution</div>'+
+      '<div class="num">#'+num.toLocaleString()+' <small>of '+TOTAL_SOLUTIONS.toLocaleString()+'</small></div>'+
+      '<span class="tag '+(isNew?'new':'old')+'">'+(isNew?'★ New find!':'Already collected')+'</span>';
+    document.getElementById('wintime').textContent=
+      'Solved in '+mm+':'+ss+' · your collection: '+found+' of '+TOTAL_SOLUTIONS.toLocaleString()+'.';
+    updateSolCount();
+    document.getElementById('win').style.display='flex';
+  }
+}
+
+/* render one saved solution as a mini hexagon */
+function drawSolMini(canvas, layout){
+  const R=9, pad=3;
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9; const cells=[];
+  layout.forEach(pc=>pc.cells.forEach(([q,r])=>{
+    const x=R*SQRT3*(q+r/2), y=R*1.5*r; cells.push({x,y,color:pc.color});
+    minx=Math.min(minx,x-R);maxx=Math.max(maxx,x+R);miny=Math.min(miny,y-R);maxy=Math.max(maxy,y+R);
+  }));
+  const w=Math.ceil(maxx-minx)+pad*2, hh=Math.ceil(maxy-miny)+pad*2;
+  const DPR=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=w*DPR; canvas.height=hh*DPR; canvas.style.width=w+'px'; canvas.style.height=hh+'px';
+  const c=canvas.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0);
+  cells.forEach(cell=>{
+    c.beginPath();
+    for(let i=0;i<6;i++){ const a=Math.PI/180*(30+60*i);
+      const x=cell.x-minx+pad+R*0.96*Math.cos(a), y=cell.y-miny+pad+R*0.96*Math.sin(a);
+      if(i===0)c.moveTo(x,y); else c.lineTo(x,y); }
+    c.closePath(); c.fillStyle=cell.color; c.fill();
+    c.lineWidth=0.6; c.strokeStyle='rgba(255,255,255,.45)'; c.stroke();
+  });
+}
+function openCollection(){
+  const col=loadCollection();
+  const entries=Object.entries(col).sort((a,b)=>b[1].date-a[1].date);
+  document.getElementById('colSub').textContent=entries.length+' found · '+TOTAL_SOLUTIONS.toLocaleString()+' total';
+  const g=document.getElementById('gallery'); g.innerHTML='';
+  if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
+  entries.forEach(([id,rec])=>{
+    const d=document.createElement('div'); d.className='sol';
+    const cv=document.createElement('canvas'); d.appendChild(cv);
+    const sn=document.createElement('div'); sn.className='sn'; sn.textContent='#'+rec.num.toLocaleString(); d.appendChild(sn);
+    const sd=document.createElement('div'); sd.className='sd'; sd.textContent=new Date(rec.date).toLocaleDateString(); d.appendChild(sd);
+    g.appendChild(d); drawSolMini(cv, rec.layout);
+  });
+  document.getElementById('collection').style.display='flex';
+}
+function newGame(shuffleOnly){
+  document.getElementById('win').style.display='none';
+  solvedFlag=false; startTime=null; selected=-1; drag=null;
+  if(!shuffleOnly) makePieces();
+  else { // clear board, randomize orientations
+    occ.clear();
+    for(const p of pieces){ p.placed=false; p.anchor=null; }
+  }
+  for(const p of pieces){
+    p.rot=Math.floor(Math.random()*6);
+    p.flip=Math.random()<0.5;
+    p._laid=false;
+  }
+  layoutTray(false);
+  updateCount(); draw();
+}
+function solveAll(){
+  document.getElementById('win').style.display='none';
+  occ.clear();
+  for(const p of pieces){
+    p.rot=0; p.flip=false; p.placed=false; p.anchor=null;
+    // solution cells are absolute; anchor = base[0]
+    const anchor={q:p.base[0][0], r:p.base[0][1]};
+    // orientedOffsets with rot0/flip false == base - base[0]
+    p.anchor=anchor; p.placed=true;
+    for(const c of placedCells(p)) occ.set(c[0]+","+c[1], pieces.indexOf(p));
+  }
+  selected=-1;
+  updateCount();
+  draw(); // reveal solution without firing the win congratulation
+}
+
+document.getElementById('rotL').onclick=()=>rotateActive(-1);
+document.getElementById('rotR').onclick=()=>rotateActive(1);
+document.getElementById('flip').onclick=flipActive;
+document.getElementById('shuffle').onclick=()=>newGame(true);
+document.getElementById('reset').onclick=()=>newGame(true);
+document.getElementById('solve').onclick=solveAll;
+document.getElementById('again').onclick=()=>newGame(true);
+document.getElementById('solutions').onclick=openCollection;
+document.getElementById('viewAll').onclick=openCollection;
+document.getElementById('colClose').onclick=()=>document.getElementById('collection').style.display='none';
+
+window.addEventListener('keydown',e=>{
+  if(e.key==='r'||e.key==='R'||e.key==='ArrowRight') { rotateActive(1); }
+  else if(e.key==='e'||e.key==='E'||e.key==='ArrowLeft'){ rotateActive(-1); }
+  else if(e.key==='f'||e.key==='F'){ flipActive(); }
+});
+canvas.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+canvas.addEventListener('dblclick',onDbl);
+canvas.addEventListener('contextmenu',e=>{ e.preventDefault(); rotateActive(1); });
+canvas.addEventListener('touchstart',onDown,{passive:false});
+canvas.addEventListener('touchmove',onMove,{passive:false});
+canvas.addEventListener('touchend',onUp,{passive:false});
+let lastTap=0, lastTapPos=null;
+canvas.addEventListener('touchend',(e)=>{
+  const n=Date.now();
+  const t=e.changedTouches&&e.changedTouches[0];
+  const rect=canvas.getBoundingClientRect();
+  const pos=t?{x:t.clientX-rect.left,y:t.clientY-rect.top}:null;
+  if(pos && lastTapPos && n-lastTap<300 && Math.hypot(pos.x-lastTapPos.x,pos.y-lastTapPos.y)<20){
+    const hit=pick(pos.x,pos.y);
+    if(hit){ selected=hit.idx; flipActive(); updateCount(); }
+  }
+  lastTap=n; lastTapPos=pos;
+});
+
+window.addEventListener('resize',resize);
+makePieces();
+newGame(true);
+resize();
+updateSolCount();
+</script>
+</body>
+</html>

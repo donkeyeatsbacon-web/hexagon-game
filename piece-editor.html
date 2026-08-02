@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hex Piece Editor</title>
+<style>
+  :root{--bg:#1b1d24;--panel:#242730;--panel2:#2c3039;--ink:#eef1f6;--muted:#9aa3b2;
+        --accent:#f0a020;--good:#57c785;--line:#3a3f4b;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);}
+  header h1{margin:0;font-size:18px;}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px;}
+  .wrap{display:flex;gap:18px;padding:18px;flex-wrap:wrap;align-items:flex-start;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  #editorCard{flex:0 0 auto;}
+  #sideCard{flex:1 1 340px;min-width:320px;}
+  svg{display:block;}
+  .hex{cursor:pointer;transition:fill .08s;}
+  .hex:hover{stroke:#fff;stroke-width:2;}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+       padding:9px 14px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;margin:4px 6px 4px 0;}
+  .btn:hover{background:#333844;}
+  .btn.primary{background:var(--accent);color:#20160a;border-color:var(--accent);}
+  .btn.primary:hover{background:#ffb733;}
+  .btn.danger{background:#3a2530;border-color:#5c2f3f;color:#ffb4c4;}
+  .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0;}
+  .stat{color:var(--muted);font-size:13px;}
+  .stat b{color:var(--ink);font-size:15px;}
+  .swatch{width:22px;height:22px;border-radius:6px;border:1px solid #0006;}
+  #pieces{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
+  .piece{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;
+         text-align:center;position:relative;}
+  .piece .n{font-size:11px;color:var(--muted);margin-top:2px;}
+  .piece .del{position:absolute;top:2px;right:4px;color:#ff8098;cursor:pointer;font-weight:700;font-size:14px;}
+  .piece .edit{position:absolute;top:2px;left:6px;color:#8ab4ff;cursor:pointer;font-weight:700;font-size:12px;}
+  textarea{width:100%;height:120px;background:#12141a;color:#cfe;border:1px solid var(--line);
+           border-radius:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:8px;margin-top:8px;}
+  .hint{color:var(--muted);font-size:12.5px;line-height:1.5;}
+  kbd{background:#3a3f4b;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;}
+  #target{color:var(--good);}
+</style>
+</head>
+<body>
+<header>
+  <h1>⬡ Hex Piece Editor</h1>
+  <p>Click cells to draw a piece → <b>Save piece</b> → repeat for all pieces → <b>Export</b> and send me the result.</p>
+</header>
+<div class="wrap">
+  <div class="card" id="editorCard">
+    <div class="row">
+      <span class="swatch" id="curSwatch"></span>
+      <span class="stat">This piece: <b id="curCount">0</b> hexes</span>
+    </div>
+    <svg id="grid"></svg>
+    <div class="row">
+      <button class="btn primary" id="save">✓ Save piece</button>
+      <button class="btn" id="clear">Clear</button>
+    </div>
+    <p class="hint">Tip: click a filled cell again to remove it. Cells don't need to touch the center —
+       the shape is saved by its layout. Rotations/flips are handled automatically in the game, so just
+       draw each piece in any orientation.</p>
+  </div>
+
+  <div class="card" id="sideCard">
+    <div class="row">
+      <span class="stat">Saved pieces: <b id="pieceCount">0</b></span>
+      <span class="stat">Total hexes: <b id="totalCount">0</b> <span id="target"></span></span>
+    </div>
+    <div id="pieces"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn primary" id="export">⬇ Export</button>
+      <button class="btn" id="copy">Copy to clipboard</button>
+      <button class="btn danger" id="resetAll">Delete all</button>
+    </div>
+    <textarea id="out" placeholder="Your pieces will appear here as text — copy it and paste it back to me, or use Export to download a file."></textarea>
+    <p class="hint" style="margin-top:10px;">
+      Your work is auto-saved in this browser, so you can close and come back.
+      For this puzzle you're aiming for <b>14 pieces / 61 hexes total</b> (but just make what you have — I'll check it).
+    </p>
+  </div>
+</div>
+
+<script>
+const SQ=Math.sqrt(3), SIZE=26;
+const COLS=11, ROWS=11;         // editor grid dimensions (offset coords)
+const PALETTE=['#FF2D9C','#00E0FF','#6AF806','#FFB200','#B026FF','#FF5630','#00FFB2','#3251FF',
+               '#F806F5','#CBFF00','#FF8E32','#00C4A7','#E5FF00','#7A5CFF','#FF6FB5','#12A5FF'];
+
+let current=new Set();          // "col,row" of cells in the piece being drawn
+let pieces=[];                  // [{cells:[[q,r]...], color}]
+let editingIndex=-1;
+
+/* offset (col,row) -> axial (q,r) for pointy-top odd-r, matching the game */
+function toAxial(col,row){ return [col - (row - (row&1))/2, row]; }
+function cellCenter(col,row){ return { x: SIZE*SQ*(col + 0.5*(row&1)) + SIZE*SQ, y: SIZE*1.5*row + SIZE*1.4 }; }
+function hexPoints(cx,cy,s){
+  let p=[];
+  for(let i=0;i<6;i++){ const a=Math.PI/180*(30+60*i); p.push((cx+s*Math.cos(a)).toFixed(1)+','+(cy+s*Math.sin(a)).toFixed(1)); }
+  return p.join(' ');
+}
+function curColor(){ return editingIndex>=0 ? pieces[editingIndex].color : PALETTE[pieces.length % PALETTE.length]; }
+
+/* build the grid */
+const svg=document.getElementById('grid');
+const W=Math.ceil(SIZE*SQ*(COLS+1))+SIZE*2, H=Math.ceil(SIZE*1.5*ROWS)+SIZE*2;
+svg.setAttribute('width',W); svg.setAttribute('height',H); svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+for(let row=0;row<ROWS;row++) for(let col=0;col<COLS;col++){
+  const {x,y}=cellCenter(col,row);
+  const poly=document.createElementNS('http://www.w3.org/2000/svg','polygon');
+  poly.setAttribute('points',hexPoints(x,y,SIZE*0.94));
+  poly.setAttribute('class','hex');
+  poly.setAttribute('data-c',col); poly.setAttribute('data-r',row);
+  poly.setAttribute('fill','#20232b'); poly.setAttribute('stroke','#333846'); poly.setAttribute('stroke-width','1.5');
+  poly.addEventListener('click',()=>toggle(col,row,poly));
+  svg.appendChild(poly);
+}
+function toggle(col,row,poly){
+  const k=col+','+row;
+  if(current.has(k)) current.delete(k); else current.add(k);
+  paint();
+}
+function paint(){
+  const col=curColor();
+  document.getElementById('curSwatch').style.background=col;
+  document.getElementById('curCount').textContent=current.size;
+  svg.querySelectorAll('.hex').forEach(h=>{
+    const k=h.getAttribute('data-c')+','+h.getAttribute('data-r');
+    h.setAttribute('fill', current.has(k)?col:'#20232b');
+  });
+}
+
+/* save / clear */
+function isConnected(cells){
+  // hex neighbors (axial)
+  const key=(q,r)=>q+','+r;
+  const set=new Set(cells.map(c=>key(c[0],c[1])));
+  if(cells.length<=1) return true;
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
+  const seen=new Set([key(cells[0][0],cells[0][1])]);
+  const stack=[cells[0]];
+  while(stack.length){
+    const [q,r]=stack.pop();
+    for(const [dq,dr] of dirs){
+      const nk=key(q+dq,r+dr);
+      if(set.has(nk)&&!seen.has(nk)){ seen.add(nk); stack.push([q+dq,r+dr]); }
+    }
+  }
+  return seen.size===cells.length;
+}
+document.getElementById('save').onclick=()=>{
+  if(current.size===0){ alert('Draw at least one cell first.'); return; }
+  const cells=[...current].map(s=>{ const [c,r]=s.split(',').map(Number); return toAxial(c,r); });
+  // normalize
+  const mq=Math.min(...cells.map(c=>c[0])), mr=Math.min(...cells.map(c=>c[1]));
+  const norm=cells.map(c=>[c[0]-mq,c[1]-mr]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  if(!isConnected(norm)){
+    if(!confirm('⚠ This piece is not one connected group of hexes — a real puzzle piece should be. Save it anyway?')) return;
+  }
+  if(editingIndex>=0){ pieces[editingIndex].cells=norm; editingIndex=-1; }
+  else pieces.push({cells:norm, color:PALETTE[pieces.length%PALETTE.length]});
+  current.clear(); paint(); render(); persist();
+};
+document.getElementById('clear').onclick=()=>{ current.clear(); editingIndex=-1; paint(); };
+
+/* saved pieces gallery */
+function miniSVG(cells,color){
+  const s=12; let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9,pts=[];
+  const centers=cells.map(([q,r])=>({x:s*SQ*(q+r/2),y:s*1.5*r}));
+  centers.forEach(c=>{minx=Math.min(minx,c.x-s);maxx=Math.max(maxx,c.x+s);miny=Math.min(miny,c.y-s);maxy=Math.max(maxy,c.y+s);});
+  const w=maxx-minx+6,h=maxy-miny+6;
+  let g='';
+  centers.forEach(c=>{ g+=`<polygon points="${hexPoints(c.x-minx+3,c.y-miny+3,s*0.94)}" fill="${color}" stroke="#0008" stroke-width="1"/>`; });
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${g}</svg>`;
+}
+function render(){
+  const box=document.getElementById('pieces'); box.innerHTML='';
+  pieces.forEach((p,i)=>{
+    const d=document.createElement('div'); d.className='piece';
+    d.innerHTML=miniSVG(p.cells,p.color)+`<div class="n">${p.cells.length} hexes</div>`
+      +`<span class="edit" title="edit">✎</span><span class="del" title="delete">✕</span>`;
+    d.querySelector('.del').onclick=()=>{ pieces.splice(i,1); render(); persist(); paint(); };
+    d.querySelector('.edit').onclick=()=>{ loadForEdit(i); };
+    box.appendChild(d);
+  });
+  document.getElementById('pieceCount').textContent=pieces.length;
+  const tot=pieces.reduce((s,p)=>s+p.cells.length,0);
+  document.getElementById('totalCount').textContent=tot;
+  document.getElementById('target').textContent = tot===61 ? '✓ (61)' : '';
+}
+function loadForEdit(i){
+  // place piece back onto grid near top-left so it's editable
+  editingIndex=i; current.clear();
+  const cells=pieces[i].cells;
+  // convert axial -> offset (col,row); place with small margin
+  cells.forEach(([q,r])=>{ const col=q + (r-(r&1))/2; current.add((col+2)+','+(r+1)); });
+  // shift so it fits: recompute using stored axial directly mapped to offset
+  current.clear();
+  cells.forEach(([q,r])=>{ const row=r+2; const col=q + (row-(row&1))/2 + 2; current.add(col+','+row); });
+  paint();
+  window.scrollTo(0,0);
+}
+
+/* export */
+function buildJSON(){
+  return JSON.stringify(pieces.map(p=>({cells:p.cells})), null, 0);
+}
+document.getElementById('export').onclick=()=>{
+  const txt=buildJSON(); document.getElementById('out').value=txt;
+  const blob=new Blob([txt],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='hex-pieces.json';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+document.getElementById('copy').onclick=async()=>{
+  const txt=buildJSON(); document.getElementById('out').value=txt;
+  try{ await navigator.clipboard.writeText(txt); document.getElementById('copy').textContent='Copied!'; setTimeout(()=>document.getElementById('copy').textContent='Copy to clipboard',1200);}catch(e){ document.getElementById('out').select(); }
+};
+document.getElementById('resetAll').onclick=()=>{ if(confirm('Delete ALL saved pieces?')){ pieces=[]; current.clear(); editingIndex=-1; render(); persist(); paint(); } };
+
+/* persistence */
+function persist(){ try{ localStorage.setItem('hexPieces', JSON.stringify(pieces)); }catch(e){} }
+function restore(){ try{ const s=localStorage.getItem('hexPieces'); if(s){ pieces=JSON.parse(s); } }catch(e){} }
+
+restore(); render(); paint();
+</script>
+</body>
+</html>
