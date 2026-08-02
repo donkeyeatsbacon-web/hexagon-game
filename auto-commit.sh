@@ -29,6 +29,15 @@ while true; do
     stamp="$(date '+%Y-%m-%d %H:%M:%S')"
     git commit -q -m "Auto-commit: ${stamp}"
     echo "[$stamp] committed changes"
+    # Back up to GitHub. Won't crash the watcher if offline — it'll
+    # push the backlog on the next successful run.
+    if git remote get-url origin >/dev/null 2>&1; then
+      if git push -q origin HEAD 2>/dev/null; then
+        echo "[$stamp] pushed to GitHub"
+      else
+        echo "[$stamp] push failed (offline?) — will retry next change"
+      fi
+    fi
   fi
   sleep "$INTERVAL"
 done
