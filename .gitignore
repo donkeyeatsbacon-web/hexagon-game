@@ -9,3 +9,6 @@ Thumbs.db
 # Logs
 *.log
 
+# Personal reference photos (kept local, not published)
+PXL_*.jpg
+
