@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hexagon Puzzle · Name Approvals (Admin)</title>
+<style>
+  :root{ --bg:#1b1d24; --panel:#242730; --panel2:#2c3039; --ink:#eef1f6; --muted:#9aa3b2;
+    --accent:#f0a020; --good:#57c785; --bad:#e5533c; --line:#3a3f4b; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{display:flex;align-items:center;gap:12px;padding:14px 18px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  header h1{font-size:17px;margin:0;font-weight:700;}
+  header .sub{color:var(--muted);font-size:12.5px;}
+  .spacer{flex:1;}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    padding:8px 13px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
+  .btn:hover{background:#333844;}
+  .btn.primary{background:var(--accent);color:#20160a;border-color:var(--accent);}
+  .btn.good{background:#1e3a2a;border-color:#2c5a40;color:var(--good);}
+  .btn.bad{background:#3a2320;border-color:#5a2c2c;color:var(--bad);}
+  .btn:disabled{opacity:.5;cursor:default;}
+  input.tok{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;font-size:13px;width:340px;font-family:ui-monospace,Menlo,monospace;}
+  .wrap{max-width:900px;margin:0 auto;padding:18px;}
+  .note{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    color:var(--muted);font-size:12.5px;line-height:1.5;margin-bottom:16px;}
+  .note code{background:#12141a;padding:1px 5px;border-radius:4px;color:var(--ink);}
+  #status{font-size:13px;color:var(--muted);margin:10px 0;min-height:18px;}
+  #status.err{color:var(--bad);} #status.ok{color:var(--good);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;
+    display:flex;flex-direction:column;gap:8px;}
+  .card .top{display:flex;gap:12px;align-items:center;}
+  .card canvas{background:#20232b;border-radius:6px;flex:0 0 auto;}
+  .card .name{font-size:17px;font-weight:800;color:var(--accent);word-break:break-word;}
+  .card .meta{font-size:11.5px;color:var(--muted);}
+  .card .meta a{color:var(--muted);}
+  .card .acts{display:flex;gap:8px;margin-top:2px;}
+  .card .acts .btn{flex:1;}
+  .empty{color:var(--muted);text-align:center;padding:40px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>⬡ Name Approvals</h1>
+  <span class="sub">donkeyeatsbacon-web/hexagon-game</span>
+  <span class="spacer"></span>
+  <input class="tok" id="token" type="password" placeholder="GitHub token (kept only in this browser)" />
+  <button class="btn" id="saveTok">Save token</button>
+  <button class="btn primary" id="refresh">Load pending</button>
+</header>
+<div class="wrap">
+  <div class="note">
+    Paste a GitHub <b>Personal Access Token</b> with write access to this repo
+    (classic: <code>repo</code> scope — or fine-grained with <b>Contents</b> &amp; <b>Issues</b> read/write).
+    It is stored only in this browser's <code>localStorage</code> and never committed.
+    <b>Approve</b> writes the name into <code>approved-names.json</code> (a direct commit that publishes it
+    to everyone) and closes the submission issue. <b>Reject</b> just closes the issue.
+  </div>
+  <div id="status"></div>
+  <div class="grid" id="list"></div>
+</div>
+
+<script>
+const O='donkeyeatsbacon-web', R='hexagon-game', LABEL='name-submission';
+const SQRT3=Math.sqrt(3);
+
+/* ---- token storage ---- */
+function getToken(){ return localStorage.getItem('hexAdminToken')||''; }
+document.getElementById('token').value = getToken();
+document.getElementById('saveTok').onclick=()=>{
+  localStorage.setItem('hexAdminToken', document.getElementById('token').value.trim());
+  setStatus('Token saved to this browser.', 'ok');
+};
+
+/* ---- helpers ---- */
+function setStatus(msg, cls){ const s=document.getElementById('status'); s.textContent=msg; s.className=cls||''; }
+function b64encode(str){ return btoa(unescape(encodeURIComponent(str))); }
+function b64decode(b64){ return decodeURIComponent(escape(atob((b64||'').replace(/\s/g,'')))); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function gh(path, opts){
+  opts=opts||{};
+  const token=getToken();
+  if(!token){ setStatus('Enter and save a GitHub token first.','err'); return Promise.reject(new Error('no token')); }
+  return fetch('https://api.github.com'+path, Object.assign({}, opts, {headers:Object.assign({
+    'Authorization':'Bearer '+token,
+    'Accept':'application/vnd.github+json',
+    'X-GitHub-Api-Version':'2022-11-28'
+  }, opts.headers||{})}));
+}
+function parsePayload(body){
+  const m = body && body.match(/```json\s*([\s\S]*?)```/);
+  if(!m) return null;
+  try{ return JSON.parse(m[1].trim()); }catch(e){ return null; }
+}
+
+/* ---- mini solution render ---- */
+function drawSolMini(canvas, layout){
+  const Rr=8, pad=3;
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9; const cells=[];
+  (layout||[]).forEach(pc=>(pc.cells||[]).forEach(([q,r])=>{
+    const x=Rr*SQRT3*(q+r/2), y=Rr*1.5*r; cells.push({x,y,color:pc.color});
+    minx=Math.min(minx,x-Rr);maxx=Math.max(maxx,x+Rr);miny=Math.min(miny,y-Rr);maxy=Math.max(maxy,y+Rr);
+  }));
+  if(!cells.length){ canvas.width=1;canvas.height=1;return; }
+  const w=Math.ceil(maxx-minx)+pad*2, hh=Math.ceil(maxy-miny)+pad*2;
+  const DPR=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=w*DPR; canvas.height=hh*DPR; canvas.style.width=w+'px'; canvas.style.height=hh+'px';
+  const c=canvas.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0);
+  cells.forEach(cell=>{
+    c.beginPath();
+    for(let i=0;i<6;i++){ const a=Math.PI/180*(30+60*i);
+      const x=cell.x-minx+pad+Rr*0.96*Math.cos(a), y=cell.y-miny+pad+Rr*0.96*Math.sin(a);
+      if(i===0)c.moveTo(x,y); else c.lineTo(x,y); }
+    c.closePath(); c.fillStyle=cell.color; c.fill();
+    c.lineWidth=0.6; c.strokeStyle='rgba(255,255,255,.45)'; c.stroke();
+  });
+}
+
+/* ---- load pending submissions ---- */
+async function loadPending(){
+  const list=document.getElementById('list'); list.innerHTML='';
+  setStatus('Loading pending submissions…');
+  let issues;
+  try{
+    const r=await gh('/repos/'+O+'/'+R+'/issues?state=open&labels='+encodeURIComponent(LABEL)+'&per_page=100');
+    if(!r.ok){ setStatus('Failed to load issues ('+r.status+'). Check the token & its scopes.','err'); return; }
+    issues=await r.json();
+  }catch(e){ if(e.message!=='no token') setStatus('Network error: '+e.message,'err'); return; }
+  issues = issues.filter(i=>!i.pull_request);
+  if(!issues.length){ list.innerHTML='<div class="empty">No pending name submissions. 🎉</div>'; setStatus('',''); return; }
+  setStatus(issues.length+' pending submission'+(issues.length>1?'s':'')+'.','');
+  issues.forEach(issue=>{
+    const payload=parsePayload(issue.body);
+    const card=document.createElement('div'); card.className='card';
+    const name = payload ? payload.name : '(unparseable — open the issue)';
+    const num = payload ? payload.num : '?';
+    const top=document.createElement('div'); top.className='top';
+    const cv=document.createElement('canvas'); top.appendChild(cv);
+    const info=document.createElement('div');
+    info.innerHTML='<div class="name">“'+esc(name)+'”</div>'+
+      '<div class="meta">solution #'+esc(num)+' · by <b>'+esc(issue.user&&issue.user.login||'?')+'</b><br>'+
+      '<a href="'+esc(issue.html_url)+'" target="_blank" rel="noopener">issue #'+issue.number+'</a></div>';
+    top.appendChild(info);
+    card.appendChild(top);
+    const acts=document.createElement('div'); acts.className='acts';
+    const yes=document.createElement('button'); yes.className='btn good'; yes.textContent='Approve';
+    const no=document.createElement('button'); no.className='btn bad'; no.textContent='Reject';
+    acts.appendChild(yes); acts.appendChild(no); card.appendChild(acts);
+    list.appendChild(card);
+    if(payload) drawSolMini(cv, payload.layout);
+    yes.onclick=async()=>{
+      if(!payload){ setStatus('Cannot approve: submission data is missing/corrupt.','err'); return; }
+      yes.disabled=no.disabled=true;
+      try{ await approve(payload, issue.number); card.remove(); setStatus('Approved “'+name+'” and published.','ok'); }
+      catch(e){ setStatus('Approve failed: '+e.message,'err'); yes.disabled=no.disabled=false; }
+    };
+    no.onclick=async()=>{
+      yes.disabled=no.disabled=true;
+      try{ await closeIssue(issue.number,'name-rejected'); card.remove(); setStatus('Rejected & closed #'+issue.number+'.','ok'); }
+      catch(e){ setStatus('Reject failed: '+e.message,'err'); yes.disabled=no.disabled=false; }
+    };
+  });
+}
+
+/* ---- approve: write approved-names.json + close issue ---- */
+async function approve(payload, issueNumber){
+  const path='approved-names.json';
+  let sha=null, data={};
+  const g=await gh('/repos/'+O+'/'+R+'/contents/'+path+'?ref=main');
+  if(g.status===200){ const j=await g.json(); sha=j.sha; try{ data=JSON.parse(b64decode(j.content))||{}; }catch(e){ data={}; } }
+  else if(g.status!==404){ throw new Error('reading approved-names.json ('+g.status+')'); }
+  data[payload.id]={ name:payload.name, num:payload.num, approvedAt:new Date().toISOString(), issue:issueNumber };
+  const put=await gh('/repos/'+O+'/'+R+'/contents/'+path,{method:'PUT',body:JSON.stringify({
+    message:'Approve name "'+payload.name+'" for solution #'+payload.num,
+    content:b64encode(JSON.stringify(data,null,2)+'\n'),
+    sha: sha||undefined,
+    branch:'main'
+  })});
+  if(!put.ok){ throw new Error('writing approved-names.json ('+put.status+') '+(await put.text())); }
+  await closeIssue(issueNumber,'name-approved');
+}
+async function closeIssue(number, label){
+  const r=await gh('/repos/'+O+'/'+R+'/issues/'+number,{method:'PATCH',body:JSON.stringify({state:'closed'})});
+  if(!r.ok) throw new Error('closing issue ('+r.status+')');
+  if(label){ await gh('/repos/'+O+'/'+R+'/issues/'+number+'/labels',{method:'POST',body:JSON.stringify({labels:[label]})}); }
+}
+
+document.getElementById('refresh').onclick=loadPending;
+if(getToken()) loadPending();
+</script>
+</body>
+</html>

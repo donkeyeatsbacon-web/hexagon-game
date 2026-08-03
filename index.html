@@ -52,6 +52,19 @@
   .badge .tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;}
   .badge .tag.new{background:#1e3a2a;color:var(--good);}
   .badge .tag.old{background:#3a3320;color:#e0b050;}
+  /* solution naming */
+  #nameBox{margin:2px 0 14px;}
+  #approvedName{font-size:15px;color:var(--ink);}
+  #approvedName b{color:var(--accent);font-size:19px;}
+  #nameSubmit{display:flex;flex-direction:column;gap:8px;align-items:center;}
+  #nameSubmit .row{display:flex;gap:8px;justify-content:center;}
+  #nameInput{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;font-size:14px;width:200px;font-family:inherit;}
+  #nameInput:focus{outline:none;border-color:var(--accent);}
+  #nameMsg{font-size:12px;color:var(--muted);min-height:15px;}
+  #nameMsg.ok{color:var(--good);}
+  .sol .sname{color:var(--accent);font-weight:700;font-size:12px;margin-top:2px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   /* collection modal */
   #collection{position:absolute;inset:0;display:none;flex-direction:column;z-index:6;
     background:rgba(12,14,18,.9);backdrop-filter:blur(4px);}
@@ -77,7 +90,6 @@
     <span class="pill">Placed <b id="count">0</b>/<b id="total">0</b></span>
     <button class="btn" id="rotL" title="Rotate left">⟲</button>
     <button class="btn" id="rotR" title="Rotate right">⟳</button>
-    <button class="btn" id="flip" title="Flip">⇋ Flip</button>
     <button class="btn" id="shuffle">Shuffle</button>
     <button class="btn" id="reset">Reset</button>
     <button class="btn" id="solve">Solve</button>
@@ -87,12 +99,22 @@
     <canvas id="c"></canvas>
     <div class="hint">
       <span><kbd>drag</kbd> move piece</span>
-      <span><kbd>R</kbd>/<kbd>right-click</kbd> rotate</span>
-      <span><kbd>F</kbd> / <kbd>double-click</kbd> flip</span>
+      <span><kbd>tap</kbd> / <kbd>R</kbd> / <kbd>right-click</kbd> rotate</span>
+      <span><kbd>drag edge</kbd> spin board</span>
     </div>
     <div id="win"><div class="card">
       <h2>🎉 Solved!</h2>
       <div class="badge" id="badge"></div>
+      <div id="nameBox">
+        <div id="approvedName"></div>
+        <div id="nameSubmit">
+          <div class="row">
+            <input id="nameInput" maxlength="40" placeholder="Name this solution…" />
+            <button class="btn primary" id="submitName">Submit for approval</button>
+          </div>
+          <div id="nameMsg"></div>
+        </div>
+      </div>
       <p id="wintime">Nicely done.</p>
       <button class="btn primary" id="again">Play again</button>
       <button class="btn" id="viewAll">View my solutions</button>
@@ -113,6 +135,28 @@
 const PIECE_DATA = [{"id":"P0","color":"#F20C0C","solution":[[2,0],[3,-1],[3,0],[3,1],[4,0]]},{"id":"P1","color":"#0000FF","solution":[[0,-4],[0,-3],[1,-4],[1,-3],[1,-2]]},{"id":"P2","color":"#00FF00","solution":[[2,-1],[3,-2],[4,-2],[4,-1]]},{"id":"P3","color":"#0CC4F2","solution":[[-4,0],[-4,1],[-4,2],[-4,3]]},{"id":"P4","color":"#F20CAD","solution":[[-2,-2],[-2,-1],[-2,0],[-1,0],[0,-1]]},{"id":"P5","color":"#FFD632","solution":[[0,1],[0,2],[1,0],[1,1],[1,2]]},{"id":"P6","color":"#0CF2AD","solution":[[-4,4],[-3,3],[-3,4]]},{"id":"P7","color":"#327AFF","solution":[[-3,-1],[-3,0],[-3,1],[-2,1]]},{"id":"P8","color":"#E500FF","solution":[[-3,2],[-2,2],[-2,3],[-1,1]]},{"id":"P9","color":"#F43D6B","solution":[[0,4],[1,3],[2,1],[2,2]]},{"id":"P10","color":"#CBFF00","solution":[[3,-4],[3,-3],[4,-4],[4,-3]]},{"id":"P11","color":"#FF8E32","solution":[[-2,4],[-1,2],[-1,3],[-1,4],[0,3]]},{"id":"P12","color":"#00FEFF","solution":[[0,0],[1,-1],[2,-4],[2,-3],[2,-2]]},{"id":"P13","color":"#3D46F4","solution":[[-1,-3],[-1,-2],[-1,-1],[0,-2]]}];
 const BOARD_RADIUS = 4;
 
+/* ---------- community solution names (GitHub-backed) ---------- */
+const GH_OWNER='donkeyeatsbacon-web', GH_REPO='hexagon-game', SUBMISSION_LABEL='name-submission';
+let approvedNames = {};                 // { solutionId: {name, num, approvedAt} }
+async function loadApprovedNames(){
+  try{
+    const r = await fetch('approved-names.json?_='+Date.now(), {cache:'no-store'});
+    if(r.ok) approvedNames = await r.json();
+  }catch(e){ /* offline / not published yet — names just won't show */ }
+}
+// open a pre-filled GitHub issue as a submission for owner approval
+function submitNameForApproval(id, num, name, layout){
+  const payload = {id, num, name, layout};
+  const title = 'Name #'+num+': '+name;
+  const body = 'A player proposed a name for a hexagon solution. Approve it in the admin page.\n\n'+
+               '```json\n'+JSON.stringify(payload)+'\n```\n';
+  const url = 'https://github.com/'+GH_OWNER+'/'+GH_REPO+'/issues/new'+
+              '?labels='+encodeURIComponent(SUBMISSION_LABEL)+
+              '&title='+encodeURIComponent(title)+
+              '&body='+encodeURIComponent(body);
+  window.open(url, '_blank', 'noopener');
+}
+
 /* ---------- hex math (pointy-top, axial q,r ; cube x=q, z=r, y=-x-z) ---------- */
 const SQRT3 = Math.sqrt(3);
 function axialToPixel(q, r, size){ return { x: size*SQRT3*(q + r/2), y: size*1.5*r }; }
@@ -121,6 +165,9 @@ function pixelToAxial(x, y, size){
   const r = (2/3 * y) / size;
   return hexRound(q, r);
 }
+function rotatePt(x, y, ang){ const c=Math.cos(ang), s=Math.sin(ang); return {x:x*c-y*s, y:x*s+y*c}; }
+// screen pixel -> board axial cell, accounting for the whole-board rotation
+function screenToBoardCell(x, y){ const p=rotatePt(x-boardOx, y-boardOy, -boardAngle); return pixelToAxial(p.x, p.y, boardSize); }
 function hexRound(q, r){
   let x=q, z=r, y=-x-z;
   let rx=Math.round(x), ry=Math.round(y), rz=Math.round(z);
@@ -158,6 +205,8 @@ for(let q=-BOARD_RADIUS;q<=BOARD_RADIUS;q++)
 let pieces = [];        // {id,color,base,rot,flip,placed,anchor:{q,r}|null,tray:{x,y}}
 let occ = new Map();    // "q,r" -> piece index (board occupancy)
 let drag = null;        // {idx, mx,my, offsetOK, moved}
+let boardDrag = null;   // {lastAng} while spinning the whole board by its edge
+let boardAngle = 0;     // whole-board rotation (radians), applied to board + placed pieces
 let selected = -1;
 let startTime = null, solvedFlag = false;
 
@@ -206,8 +255,8 @@ function resize(){
 // max bounding box of a piece over ALL 12 orientations, at hex size 1
 function pieceExtentAll(p){
   let mw=1, mh=1;
-  for(let f=0;f<2;f++) for(let rot=0;rot<6;rot++){
-    const t=transformCells(p.base,rot,!!f);
+  for(let rot=0;rot<6;rot++){
+    const t=transformCells(p.base,rot,false);
     const o0=t[0]; let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
     for(const c of t){
       const px=axialToPixel(c[0]-o0[0],c[1]-o0[1],1);
@@ -318,41 +367,46 @@ function drawPieceHexes(cells, cx, cy, size, color, alpha, highlight){
 function draw(){
   ctx.clearRect(0,0,W,H);
 
+  // board + placed pieces render in the rotated board frame (origin at board center)
+  ctx.save();
+  ctx.translate(boardOx, boardOy);
+  ctx.rotate(boardAngle);
+
   // board empty cells
   for(const [q,r] of boardCells){
     const p=axialToPixel(q,r,boardSize);
-    drawCellHex(boardOx+p.x, boardOy+p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
+    drawCellHex(p.x, p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
   }
 
   // placed pieces
   pieces.forEach((p,idx)=>{
     if(!p.placed || (drag && drag.idx===idx)) return;
-    const cells = placedCells(p).map(c=>c); // absolute
-    const rel = cells.map(c=>[c[0],c[1]]);
-    // draw at board origin using absolute coords
-    drawPieceHexes(rel, boardOx, boardOy, boardSize, p.color, 1, selected===idx?'#ffffff':null);
+    const cells = placedCells(p); // absolute board cells
+    drawPieceHexes(cells, 0, 0, boardSize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
-  // tray pieces
+  // dragging piece snapped onto the board (drawn inside rotated frame so it aligns)
+  if(drag && drag.snapCell){
+    const p=pieces[drag.idx];
+    const offs = orientedOffsets(p);
+    const cells = offs.map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
+    const good = drag.valid;
+    drawPieceHexes(cells, 0, 0, boardSize, p.color, good?1:0.85, good?'#ffffff':'#e5533c');
+  }
+  ctx.restore();
+
+  // tray pieces (screen frame, unrotated)
   pieces.forEach((p,idx)=>{
     if(p.placed || (drag && drag.idx===idx)) return;
     const offs = orientedOffsets(p);
     drawPieceHexes(offs, p.tray.x, p.tray.y, traySize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
-  // dragging piece (drawn last, on top)
-  if(drag){
+  // free-floating dragging piece (off the board, drawn last on top)
+  if(drag && !drag.snapCell){
     const p=pieces[drag.idx];
     const offs = orientedOffsets(p);
-    if(drag.snapCell){
-      // preview snapped on board
-      const cells = offs.map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
-      const good = drag.valid;
-      drawPieceHexes(cells, boardOx, boardOy, boardSize, p.color, good?1:0.85,
-        good?'#ffffff':'#e5533c');
-    } else {
-      drawPieceHexes(offs, drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
-    }
+    drawPieceHexes(offs, drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
   }
 }
 
@@ -374,7 +428,7 @@ function pick(px,py){
     if(offs.some(o=>o[0]===local.q&&o[1]===local.r)) return {idx:i,kind:'tray'};
   }
   // placed pieces
-  const cell=pixelToAxial(px-boardOx, py-boardOy, boardSize);
+  const cell=screenToBoardCell(px, py);
   const key=cell.q+","+cell.r;
   if(occ.has(key)) return {idx:occ.get(key), kind:'board'};
   return null;
@@ -414,7 +468,15 @@ function onDown(e){
   if(solvedFlag) return;
   const {x,y}=evtPos(e);
   const hit=pick(x,y);
-  if(!hit){ selected=-1; draw(); return; }
+  if(!hit){
+    // grabbed empty space near the board's outer edge -> spin the whole board
+    const d=Math.hypot(x-boardOx, y-boardOy);
+    if(d>boardCircumR*0.5 && d<boardCircumR*1.3){
+      boardDrag={lastAng:Math.atan2(y-boardOy, x-boardOx), raw:boardAngle};
+      selected=-1; draw(); e.preventDefault(); return;
+    }
+    selected=-1; draw(); return;
+  }
   if(startTime===null) startTime=Date.now();
   const idx=hit.idx;
   selected=idx;
@@ -429,9 +491,19 @@ function onDown(e){
   e.preventDefault();
 }
 function onMove(e){
+  if(boardDrag){
+    const {x,y}=evtPos(e);
+    const ang=Math.atan2(y-boardOy, x-boardOx);
+    let d=ang-boardDrag.lastAng;
+    while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
+    boardDrag.raw+=d; boardDrag.lastAng=ang;
+    const STEP=Math.PI/3;                 // 60° — snap to hexagon symmetry so nothing tilts oddly
+    boardAngle=Math.round(boardDrag.raw/STEP)*STEP;
+    draw(); e.preventDefault(); return;
+  }
   if(!drag) return;
   const {x,y}=evtPos(e);
-  if(Math.hypot(x-drag.downX,y-drag.downY)>4) drag.moved=true;
+  if(Math.hypot(x-drag.downX,y-drag.downY)>8) drag.moved=true;
   drag.mx=x; drag.my=y;
   updateSnap();
   draw();
@@ -439,7 +511,7 @@ function onMove(e){
 }
 function updateSnap(){
   // if pointer is near/over the board, snap the grabbed (first) cell to nearest board cell
-  const cell=pixelToAxial(drag.mx-boardOx, drag.my-boardOy, boardSize);
+  const cell=screenToBoardCell(drag.mx, drag.my);
   const overBoard = boardSet.has(cell.q+","+cell.r) ||
      Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.02;
   if(overBoard){
@@ -450,12 +522,19 @@ function updateSnap(){
   }
 }
 function onUp(e){
+  if(boardDrag){ boardDrag=null; e && e.preventDefault(); return; }
   if(!drag) return;
   const idx=drag.idx;
   if(!drag.moved){
-    // treat as a click/select: restore to where it came from, don't place/move
-    if(drag.wasPlaced) tryPlace(idx, drag.origAnchor.q, drag.origAnchor.r);
-    else { pieces[idx].placed=false; pieces[idx].anchor=null; }
+    // a tap (no drag) rotates the piece in place
+    const p=pieces[idx];
+    p.rot=(p.rot+1)%6;
+    if(drag.wasPlaced){
+      // keep it on the board at the same spot if the rotation still fits, else drop to tray
+      if(!tryPlace(idx, drag.origAnchor.q, drag.origAnchor.r)){
+        p.placed=false; p.anchor=null; p._laid=false;
+      }
+    }
   } else if(drag.snapCell && drag.valid){
     tryPlace(idx, drag.snapCell.q, drag.snapCell.r);
   } else {
@@ -476,38 +555,15 @@ function rotateActive(dir){
   const i=activeIdx(); if(i<0) return;
   const p=pieces[i];
   const wasPlaced=p.placed;
+  const anchor=wasPlaced?{q:p.anchor.q, r:p.anchor.r}:null;
   if(wasPlaced) removeFromBoard(i);
   p.rot=((p.rot + (dir>0?1:5))%6);
-  if(wasPlaced){
-    // try to place back at same anchor, else drop to tray
-    if(!(p.anchor && false)){}
-  }
-  if(drag) updateSnap();
-  else if(wasPlaced){
-    // attempt to keep on board at old anchor
-  }
-  layoutTray(true);
-  draw();
-}
-function flipActive(){
-  const i=activeIdx(); if(i<0) return;
-  const p=pieces[i];
-  if(p.placed) removeFromBoard(i);
-  p.flip=!p.flip;
+  // keep it on the board at the same spot if it still fits, else drop to tray
+  if(wasPlaced && !tryPlace(i, anchor.q, anchor.r)){ p.placed=false; p.anchor=null; p._laid=false; }
   if(drag) updateSnap();
   layoutTray(true);
-  draw();
-}
-
-/* double click / dbl tap => flip the piece under the cursor */
-function onDbl(e){
-  const {x,y}=evtPos(e);
-  const hit=pick(x,y);
-  if(!hit) return;
-  selected=hit.idx;
-  flipActive();      // flips the selected piece (pops off board if it no longer fits)
   updateCount();
-  e && e.preventDefault && e.preventDefault();
+  draw();
 }
 
 /* ---------- buttons & win ---------- */
@@ -543,9 +599,13 @@ function checkWin(){
     const h=cyrb53(solutionKey());
     const id=h.toString(36);
     const num=(h % TOTAL_SOLUTIONS)+1;
+    const layout=currentLayout();
     const col=loadCollection();
     const isNew=!(id in col);
-    if(isNew){ col[id]={num, date:Date.now(), layout:currentLayout()}; saveCollection(col); }
+    const approved=approvedNames[id];   // {name,...} if this exact solution has an approved name
+    if(isNew){ col[id]={num, date:Date.now(), layout}; }
+    if(approved) col[id] && (col[id].name=approved.name);
+    saveCollection(col);
     const found=Object.keys(col).length;
     document.getElementById('badge').innerHTML=
       '<div class="lab">Solution</div>'+
@@ -553,10 +613,34 @@ function checkWin(){
       '<span class="tag '+(isNew?'new':'old')+'">'+(isNew?'★ New find!':'Already collected')+'</span>';
     document.getElementById('wintime').textContent=
       'Solved in '+mm+':'+ss+' · your collection: '+found+' of '+TOTAL_SOLUTIONS.toLocaleString()+'.';
+    renderNaming(id, num, layout, approved);
     updateSolCount();
     document.getElementById('win').style.display='flex';
   }
 }
+
+let pendingSubmit=null;   // {id,num,layout} for the current solved board
+function renderNaming(id, num, layout, approved){
+  const nameEl=document.getElementById('approvedName');
+  const submitEl=document.getElementById('nameSubmit');
+  const msg=document.getElementById('nameMsg');
+  msg.textContent=''; msg.className='';
+  if(approved){
+    // this solution already has an owner-approved name → show it, hide the form
+    nameEl.innerHTML='This solution is known as <b>“'+escapeHtml(approved.name)+'”</b>';
+    nameEl.style.display='';
+    submitEl.style.display='none';
+    pendingSubmit=null;
+  } else {
+    nameEl.style.display='none';
+    submitEl.style.display='';
+    document.getElementById('nameInput').value='';
+    document.getElementById('submitName').disabled=false;
+    pendingSubmit={id, num, layout};
+  }
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>(
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* render one saved solution as a mini hexagon */
 function drawSolMini(canvas, layout){
@@ -579,16 +663,19 @@ function drawSolMini(canvas, layout){
     c.lineWidth=0.6; c.strokeStyle='rgba(255,255,255,.45)'; c.stroke();
   });
 }
-function openCollection(){
+async function openCollection(){
+  await loadApprovedNames();            // pull the latest approved names before rendering
   const col=loadCollection();
   const entries=Object.entries(col).sort((a,b)=>b[1].date-a[1].date);
   document.getElementById('colSub').textContent=entries.length+' found · '+TOTAL_SOLUTIONS.toLocaleString()+' total';
   const g=document.getElementById('gallery'); g.innerHTML='';
   if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
   entries.forEach(([id,rec])=>{
+    const name=(approvedNames[id] && approvedNames[id].name) || rec.name;
     const d=document.createElement('div'); d.className='sol';
     const cv=document.createElement('canvas'); d.appendChild(cv);
     const sn=document.createElement('div'); sn.className='sn'; sn.textContent='#'+rec.num.toLocaleString(); d.appendChild(sn);
+    if(name){ const nm=document.createElement('div'); nm.className='sname'; nm.textContent='“'+name+'”'; nm.title=name; d.appendChild(nm); }
     const sd=document.createElement('div'); sd.className='sd'; sd.textContent=new Date(rec.date).toLocaleDateString(); d.appendChild(sd);
     g.appendChild(d); drawSolMini(cv, rec.layout);
   });
@@ -596,7 +683,7 @@ function openCollection(){
 }
 function newGame(shuffleOnly){
   document.getElementById('win').style.display='none';
-  solvedFlag=false; startTime=null; selected=-1; drag=null;
+  solvedFlag=false; startTime=null; selected=-1; drag=null; boardDrag=null; boardAngle=0;
   if(!shuffleOnly) makePieces();
   else { // clear board, randomize orientations
     occ.clear();
@@ -604,7 +691,7 @@ function newGame(shuffleOnly){
   }
   for(const p of pieces){
     p.rot=Math.floor(Math.random()*6);
-    p.flip=Math.random()<0.5;
+    p.flip=false;
     p._laid=false;
   }
   layoutTray(false);
@@ -628,7 +715,6 @@ function solveAll(){
 
 document.getElementById('rotL').onclick=()=>rotateActive(-1);
 document.getElementById('rotR').onclick=()=>rotateActive(1);
-document.getElementById('flip').onclick=flipActive;
 document.getElementById('shuffle').onclick=()=>newGame(true);
 document.getElementById('reset').onclick=()=>newGame(true);
 document.getElementById('solve').onclick=solveAll;
@@ -636,38 +722,39 @@ document.getElementById('again').onclick=()=>newGame(true);
 document.getElementById('solutions').onclick=openCollection;
 document.getElementById('viewAll').onclick=openCollection;
 document.getElementById('colClose').onclick=()=>document.getElementById('collection').style.display='none';
+document.getElementById('submitName').onclick=()=>{
+  if(!pendingSubmit) return;
+  const input=document.getElementById('nameInput');
+  const msg=document.getElementById('nameMsg');
+  const name=input.value.trim();
+  if(name.length<2){ msg.textContent='Please enter a name (at least 2 characters).'; msg.className=''; return; }
+  submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
+  msg.textContent='Opening GitHub to submit “'+name+'” for approval…';
+  msg.className='ok';
+  document.getElementById('submitName').disabled=true;
+};
+document.getElementById('nameInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){ e.preventDefault(); document.getElementById('submitName').click(); }
+});
 
 window.addEventListener('keydown',e=>{
   if(e.key==='r'||e.key==='R'||e.key==='ArrowRight') { rotateActive(1); }
   else if(e.key==='e'||e.key==='E'||e.key==='ArrowLeft'){ rotateActive(-1); }
-  else if(e.key==='f'||e.key==='F'){ flipActive(); }
 });
 canvas.addEventListener('mousedown',onDown);
 window.addEventListener('mousemove',onMove);
 window.addEventListener('mouseup',onUp);
-canvas.addEventListener('dblclick',onDbl);
 canvas.addEventListener('contextmenu',e=>{ e.preventDefault(); rotateActive(1); });
 canvas.addEventListener('touchstart',onDown,{passive:false});
 canvas.addEventListener('touchmove',onMove,{passive:false});
 canvas.addEventListener('touchend',onUp,{passive:false});
-let lastTap=0, lastTapPos=null;
-canvas.addEventListener('touchend',(e)=>{
-  const n=Date.now();
-  const t=e.changedTouches&&e.changedTouches[0];
-  const rect=canvas.getBoundingClientRect();
-  const pos=t?{x:t.clientX-rect.left,y:t.clientY-rect.top}:null;
-  if(pos && lastTapPos && n-lastTap<300 && Math.hypot(pos.x-lastTapPos.x,pos.y-lastTapPos.y)<20){
-    const hit=pick(pos.x,pos.y);
-    if(hit){ selected=hit.idx; flipActive(); updateCount(); }
-  }
-  lastTap=n; lastTapPos=pos;
-});
 
 window.addEventListener('resize',resize);
 makePieces();
 newGame(true);
 resize();
 updateSolCount();
+loadApprovedNames();   // fetch the published approved names (async, non-blocking)
 </script>
 </body>
 </html>
