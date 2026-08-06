@@ -100,6 +100,7 @@
     <div class="hint">
       <span><kbd>drag</kbd> move piece</span>
       <span><kbd>tap</kbd> / <kbd>R</kbd> / <kbd>right-click</kbd> rotate</span>
+      <span><kbd>double-click</kbd> flip</span>
       <span>overlaps flash <span style="color:#ff5a44">red</span></span>
     </div>
     <div id="win"><div class="card">
@@ -204,6 +205,7 @@ let cover = new Map();  // "q,r" -> [piece indices covering this cell] (overlaps
 let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
 let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
 let drag = null;        // {idx, mx,my, moved, ...}
+let lastTap = null;     // {t,idx} last no-move tap, for double-click(-tap) flip detection
 let selected = -1;
 let startTime = null, solvedFlag = false;
 
@@ -524,20 +526,34 @@ function updateSnap(){
 function onUp(e){
   if(!drag) return;
   const idx=drag.idx, p=pieces[idx];
+  let trayChanged=false;   // only re-scatter the tray when a piece enters/leaves it
   if(!drag.moved){
-    // a tap (no drag) rotates the piece in place
-    p.rot=(p.rot+1)%6;
-    // if it was on the board, drop it back at the same spot (unless rotation runs off-board)
+    const now=Date.now();
+    if(lastTap && now-lastTap.t<320 && lastTap.idx===idx){
+      // second tap of a double-click(-tap) on the same piece -> flip it
+      // (undo the +1 the first tap applied, so a double is a pure flip, no net rotation)
+      p.rot=(p.rot+5)%6;
+      p.flip=!p.flip;
+      lastTap=null;
+    } else {
+      // single tap rotates the piece in place
+      p.rot=(p.rot+1)%6;
+      lastTap={t:now, idx};
+    }
+    // if it was on the board, drop it back at the same spot (unless it now runs off-board)
     if(drag.wasPlaced) placeAt(idx, drag.origAnchor.q, drag.origAnchor.r);
+    // NB: no layoutTray() here — keep the piece under the cursor so a 2nd tap lands on it
   } else if(drag.snapCell && drag.valid){
     placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
+    trayChanged=true;
   } else {
     // dropped off the board -> send to tray
     p.placed=false; p.anchor=null;
+    trayChanged=true;
   }
   drag=null;
   recompute();
-  layoutTray();
+  if(trayChanged) layoutTray();
   updateCount();
   checkWin();
   draw();
