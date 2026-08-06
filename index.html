@@ -100,7 +100,7 @@
     <div class="hint">
       <span><kbd>drag</kbd> move piece</span>
       <span><kbd>tap</kbd> / <kbd>R</kbd> / <kbd>right-click</kbd> rotate</span>
-      <span><kbd>drag edge</kbd> spin board</span>
+      <span>overlaps flash <span style="color:#ff5a44">red</span></span>
     </div>
     <div id="win"><div class="card">
       <h2>🎉 Solved!</h2>
@@ -165,9 +165,6 @@ function pixelToAxial(x, y, size){
   const r = (2/3 * y) / size;
   return hexRound(q, r);
 }
-function rotatePt(x, y, ang){ const c=Math.cos(ang), s=Math.sin(ang); return {x:x*c-y*s, y:x*s+y*c}; }
-// screen pixel -> board axial cell, accounting for the whole-board rotation
-function screenToBoardCell(x, y){ const p=rotatePt(x-boardOx, y-boardOy, -boardAngle); return pixelToAxial(p.x, p.y, boardSize); }
 function hexRound(q, r){
   let x=q, z=r, y=-x-z;
   let rx=Math.round(x), ry=Math.round(y), rz=Math.round(z);
@@ -203,10 +200,10 @@ for(let q=-BOARD_RADIUS;q<=BOARD_RADIUS;q++)
 
 /* ---------- game state ---------- */
 let pieces = [];        // {id,color,base,rot,flip,placed,anchor:{q,r}|null,tray:{x,y}}
-let occ = new Map();    // "q,r" -> piece index (board occupancy)
-let drag = null;        // {idx, mx,my, offsetOK, moved}
-let boardDrag = null;   // {lastAng} while spinning the whole board by its edge
-let boardAngle = 0;     // whole-board rotation (radians), applied to board + placed pieces
+let cover = new Map();  // "q,r" -> [piece indices covering this cell] (overlaps allowed)
+let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
+let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
+let drag = null;        // {idx, mx,my, moved, ...}
 let selected = -1;
 let startTime = null, solvedFlag = false;
 
@@ -215,7 +212,7 @@ function makePieces(){
     id:p.id, color:p.color, base:p.solution.map(c=>[c[0],c[1]]),
     rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}
   }));
-  occ.clear();
+  cover.clear(); overlapCells.clear();
 }
 // cells of a piece given its current orientation, anchored so cell[0] sits at `anchor`
 function orientedOffsets(p){
@@ -268,43 +265,48 @@ function pieceExtentAll(p){
   return {w:mw,h:mh};
 }
 
-// point at arc-length `d` along a rectangle centred at (cx,cy) with half-extents ax,ay
-function rectPoint(d, cx, cy, ax, ay){
-  const w=2*ax, h=2*ay, per=2*(w+h);
-  d=((d%per)+per)%per;
-  if(d<w) return [cx-ax+d, cy-ay];      // top  L->R
-  d-=w; if(d<h) return [cx+ax, cy-ay+d]; // right T->B
-  d-=h; if(d<w) return [cx+ax-d, cy+ay]; // bottom R->L
-  d-=w; return [cx-ax, cy+ay-d];         // left B->T
-}
-// Scatter every piece around the OUTSIDE of the board, on a ring hugging the canvas
-// edges/corners. Slots are fixed per piece index, so pieces don't jump as others are
-// placed; the size is picked so all pieces stay fully on-screen and clear of the board.
+// Scatter the pieces in a compact cluster HUGGING the board (concentric rings just
+// outside it), rather than spread to the far canvas edges. On a wide screen this keeps
+// everything within ~min(W,H) of centre, leaving the sides empty instead of stretching
+// the layout across the whole width. Deterministic per-index jitter gives a scattered
+// (non-perfect-circle) look while keeping slots stable so pieces don't jump around.
 function layoutTray(){
   const N = pieces.length;
-  // worst-case piece extent over ALL orientations, so rotating/flipping never overflows
   let maxExt=1;
   for(const p of pieces){ const e=pieceExtentAll(p); maxExt=Math.max(maxExt,e.w,e.h); }
+  const Rmax = Math.min(W,H)/2 - 6;           // binding dimension keeps pieces on-screen
   let chosen=null;
-  for(let size=boardSize*1.15; size>=5; size*=0.94){
-    const halfMax=(maxExt*size)/2 + size*0.35;   // half slot + padding
-    const margin=halfMax+4;
-    const ax=W/2-margin, ay=H/2-margin;
-    if(ax<=10||ay<=10) continue;
-    const per=2*(2*ax+2*ay);
-    if(per/N < 2.05*halfMax) continue;                 // neighbours would touch
-    if(Math.min(ax,ay)-halfMax < boardCircumR+4) continue; // would overlap the board
-    chosen={size,ax,ay,per}; break;
+  for(let size=Math.max(6,boardSize); size>=4; size*=0.9){
+    const slot = maxExt*size + size*0.5;      // per-piece footprint diameter
+    const r0   = boardCircumR + slot*0.5 + 4; // first ring sits just off the board
+    const rowH = slot*0.88;
+    const rings=[]; let cap=0;
+    for(let r=r0; r+slot*0.5<=Rmax; r+=rowH){
+      const per=Math.max(1, Math.floor((2*Math.PI*r)/slot));
+      rings.push({r,per}); cap+=per;
+      if(cap>=N) break;
+    }
+    if(cap>=N){ chosen={size,slot,rings}; break; }
   }
-  if(!chosen){ const s=6,ax=Math.max(11,W/2-20),ay=Math.max(11,H/2-20); chosen={size:s,ax,ay,per:2*(2*ax+2*ay)}; }
+  if(!chosen){ const size=4, slot=maxExt*size+size*0.5;
+    chosen={size,slot,rings:[{r:boardCircumR+slot*0.5+4, per:N}]}; }
   traySize=chosen.size;
-  const {ax,ay,per}=chosen;
-  pieces.forEach((p,i)=>{
-    const [px,py]=rectPoint((i+0.5)/N*per, boardOx, boardOy, ax, ay);
-    const bb=pieceBBox(p,traySize);
-    p.tray.x = px - (bb.minx+bb.maxx)/2;   // centre piece on its ring slot
-    p.tray.y = py - (bb.miny+bb.maxy)/2;
-    p._laid=true;
+  let i=0;
+  chosen.rings.forEach((ring,ri)=>{
+    const per=Math.min(ring.per, N-i);
+    const spread=ring.per;
+    const base=ri*0.65;                       // offset each ring so slots don't line up
+    for(let k=0;k<per && i<N;k++,i++){
+      const p=pieces[i];
+      const h =((i*2654435761)>>>0)/4294967296;      // deterministic 0..1
+      const h2=((i*40503+12345)>>>0)/4294967296;
+      const ang = base + (k+0.5)/spread*2*Math.PI + (h-0.5)*(2*Math.PI/spread)*0.6;
+      const rr  = ring.r + (h2-0.5)*chosen.slot*0.35;
+      const cx=boardOx + rr*Math.cos(ang), cy=boardOy + rr*Math.sin(ang);
+      const bb=pieceBBox(p,traySize);
+      p.tray.x = cx - (bb.minx+bb.maxx)/2;
+      p.tray.y = cy - (bb.miny+bb.maxy)/2;
+    }
   });
 }
 function pieceBBox(p, size){
@@ -364,51 +366,63 @@ function drawPieceHexes(cells, cx, cy, size, color, alpha, highlight){
   ctx.restore();
 }
 
+// red overlay on a single board cell (used for overlap flash + bad preview cells)
+function markCellRed(q, r, alpha){
+  const p=axialToPixel(q,r,boardSize);
+  if(alpha){ ctx.globalAlpha=alpha; drawCellHex(boardOx+p.x, boardOy+p.y-boardSize*0.07, boardSize, '#e5533c', null); }
+  ctx.globalAlpha=1; drawCellHex(boardOx+p.x, boardOy+p.y-boardSize*0.07, boardSize, null, '#ff2a1a', Math.max(2,boardSize*0.12));
+}
 function draw(){
   ctx.clearRect(0,0,W,H);
-
-  // board + placed pieces render in the rotated board frame (origin at board center)
-  ctx.save();
-  ctx.translate(boardOx, boardOy);
-  ctx.rotate(boardAngle);
 
   // board empty cells
   for(const [q,r] of boardCells){
     const p=axialToPixel(q,r,boardSize);
-    drawCellHex(p.x, p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
+    drawCellHex(boardOx+p.x, boardOy+p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
   }
 
-  // placed pieces
+  // placed pieces (overlaps allowed — they just stack)
   pieces.forEach((p,idx)=>{
     if(!p.placed || (drag && drag.idx===idx)) return;
-    const cells = placedCells(p); // absolute board cells
-    drawPieceHexes(cells, 0, 0, boardSize, p.color, 1, selected===idx?'#ffffff':null);
+    drawPieceHexes(placedCells(p), boardOx, boardOy, boardSize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
-  // dragging piece snapped onto the board (drawn inside rotated frame so it aligns)
+  // flash every cell where two or more pieces intersect
+  if(overlapCells.size){
+    const pulse=0.30+0.45*(0.5+0.5*Math.sin(Date.now()/160));
+    ctx.save();
+    for(const k of overlapCells){ const [q,r]=k.split(',').map(Number); markCellRed(q,r,pulse); }
+    ctx.restore();
+  }
+
+  // dragging piece snapped onto the board (preview)
   if(drag && drag.snapCell){
     const p=pieces[drag.idx];
-    const offs = orientedOffsets(p);
-    const cells = offs.map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
-    const good = drag.valid;
-    drawPieceHexes(cells, 0, 0, boardSize, p.color, good?1:0.85, good?'#ffffff':'#e5533c');
+    const cells = orientedOffsets(p).map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
+    drawPieceHexes(cells, boardOx, boardOy, boardSize, p.color, drag.valid?0.95:0.6, '#ffffff');
+    // outline cells that are off-board (can't drop) or would overlap an existing piece
+    ctx.save();
+    for(const c of cells){ const k=c[0]+','+c[1];
+      if(!boardSet.has(k) || cover.has(k)) markCellRed(c[0],c[1],0); }
+    ctx.restore();
   }
-  ctx.restore();
 
-  // tray pieces (screen frame, unrotated)
+  // tray pieces
   pieces.forEach((p,idx)=>{
     if(p.placed || (drag && drag.idx===idx)) return;
-    const offs = orientedOffsets(p);
-    drawPieceHexes(offs, p.tray.x, p.tray.y, traySize, p.color, 1, selected===idx?'#ffffff':null);
+    drawPieceHexes(orientedOffsets(p), p.tray.x, p.tray.y, traySize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
   // free-floating dragging piece (off the board, drawn last on top)
   if(drag && !drag.snapCell){
     const p=pieces[drag.idx];
-    const offs = orientedOffsets(p);
-    drawPieceHexes(offs, drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
+    drawPieceHexes(orientedOffsets(p), drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
   }
 }
+// keep the overlap cells pulsing while any intersection exists
+function flashLoop(){ flashRAF=null; draw(); if(overlapCells.size) flashRAF=requestAnimationFrame(flashLoop); }
+function startFlash(){ if(flashRAF==null) flashRAF=requestAnimationFrame(flashLoop); }
+function stopFlash(){ if(flashRAF!=null){ cancelAnimationFrame(flashRAF); flashRAF=null; } }
 
 /* ---------- interaction ---------- */
 function evtPos(e){
@@ -427,56 +441,52 @@ function pick(px,py){
     const local=pixelToAxial(px-p.tray.x, py-p.tray.y, traySize);
     if(offs.some(o=>o[0]===local.q&&o[1]===local.r)) return {idx:i,kind:'tray'};
   }
-  // placed pieces
-  const cell=screenToBoardCell(px, py);
-  const key=cell.q+","+cell.r;
-  if(occ.has(key)) return {idx:occ.get(key), kind:'board'};
+  // placed pieces — return the topmost (last-drawn) piece covering this cell
+  const cell=pixelToAxial(px-boardOx, py-boardOy, boardSize);
+  const a=cover.get(cell.q+","+cell.r);
+  if(a && a.length) return {idx:Math.max(...a), kind:'board'};
   return null;
 }
 
+// rebuild the cell->pieces coverage map and the set of overlapping cells
+function recompute(){
+  cover.clear();
+  pieces.forEach((p,idx)=>{
+    if(!p.placed) return;
+    for(const c of placedCells(p)){
+      const k=c[0]+","+c[1];
+      let a=cover.get(k); if(!a){ a=[]; cover.set(k,a); }
+      a.push(idx);
+    }
+  });
+  overlapCells.clear();
+  for(const [k,a] of cover) if(a.length>1) overlapCells.add(k);
+  if(overlapCells.size) startFlash(); else stopFlash();
+}
 function removeFromBoard(idx){
   const p=pieces[idx];
   if(!p.placed) return;
-  for(const c of placedCells(p)) occ.delete(c[0]+","+c[1]);
   p.placed=false; p.anchor=null;
+  recompute();
 }
-function tryPlace(idx, cellQ, cellR){
-  const p=pieces[idx];
-  const offs=orientedOffsets(p);
-  const cells=offs.map(o=>[cellQ+o[0], cellR+o[1]]);
-  for(const c of cells){
-    const k=c[0]+","+c[1];
-    if(!boardSet.has(k)) return false;
-    if(occ.has(k) && occ.get(k)!==idx) return false;
-  }
-  for(const c of cells) occ.set(c[0]+","+c[1], idx);
-  p.placed=true; p.anchor={q:cellQ,r:cellR};
+// place anywhere on the board (overlaps allowed); only refuses to hang off the board
+function placeAt(idx, cellQ, cellR){
+  if(!validAt(idx, cellQ, cellR)) return false;
+  pieces[idx].placed=true; pieces[idx].anchor={q:cellQ,r:cellR};
+  recompute();
   return true;
 }
+// valid == the whole piece lands on board cells (occupancy is ignored — overlaps are ok)
 function validAt(idx, cellQ, cellR){
-  const p=pieces[idx];
-  const offs=orientedOffsets(p);
-  for(const o of offs){
-    const q=cellQ+o[0], r=cellR+o[1], k=q+","+r;
-    if(!boardSet.has(k)) return false;
-    if(occ.has(k) && occ.get(k)!==idx) return false;
-  }
-  return true;
+  const offs=orientedOffsets(pieces[idx]);
+  return offs.every(o=>boardSet.has((cellQ+o[0])+","+(cellR+o[1])));
 }
 
 function onDown(e){
   if(solvedFlag) return;
   const {x,y}=evtPos(e);
   const hit=pick(x,y);
-  if(!hit){
-    // grabbed empty space near the board's outer edge -> spin the whole board
-    const d=Math.hypot(x-boardOx, y-boardOy);
-    if(d>boardCircumR*0.5 && d<boardCircumR*1.3){
-      boardDrag={lastAng:Math.atan2(y-boardOy, x-boardOx), raw:boardAngle};
-      selected=-1; draw(); e.preventDefault(); return;
-    }
-    selected=-1; draw(); return;
-  }
+  if(!hit){ selected=-1; draw(); return; }
   if(startTime===null) startTime=Date.now();
   const idx=hit.idx;
   selected=idx;
@@ -491,16 +501,6 @@ function onDown(e){
   e.preventDefault();
 }
 function onMove(e){
-  if(boardDrag){
-    const {x,y}=evtPos(e);
-    const ang=Math.atan2(y-boardOy, x-boardOx);
-    let d=ang-boardDrag.lastAng;
-    while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
-    boardDrag.raw+=d; boardDrag.lastAng=ang;
-    const STEP=Math.PI/3;                 // 60° — snap to hexagon symmetry so nothing tilts oddly
-    boardAngle=Math.round(boardDrag.raw/STEP)*STEP;
-    draw(); e.preventDefault(); return;
-  }
   if(!drag) return;
   const {x,y}=evtPos(e);
   if(Math.hypot(x-drag.downX,y-drag.downY)>8) drag.moved=true;
@@ -511,7 +511,7 @@ function onMove(e){
 }
 function updateSnap(){
   // if pointer is near/over the board, snap the grabbed (first) cell to nearest board cell
-  const cell=screenToBoardCell(drag.mx, drag.my);
+  const cell=pixelToAxial(drag.mx-boardOx, drag.my-boardOy, boardSize);
   const overBoard = boardSet.has(cell.q+","+cell.r) ||
      Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.02;
   if(overBoard){
@@ -522,34 +522,29 @@ function updateSnap(){
   }
 }
 function onUp(e){
-  if(boardDrag){ boardDrag=null; e && e.preventDefault(); return; }
   if(!drag) return;
-  const idx=drag.idx;
+  const idx=drag.idx, p=pieces[idx];
   if(!drag.moved){
     // a tap (no drag) rotates the piece in place
-    const p=pieces[idx];
     p.rot=(p.rot+1)%6;
-    if(drag.wasPlaced){
-      // keep it on the board at the same spot if the rotation still fits, else drop to tray
-      if(!tryPlace(idx, drag.origAnchor.q, drag.origAnchor.r)){
-        p.placed=false; p.anchor=null; p._laid=false;
-      }
-    }
+    // if it was on the board, drop it back at the same spot (unless rotation runs off-board)
+    if(drag.wasPlaced) placeAt(idx, drag.origAnchor.q, drag.origAnchor.r);
   } else if(drag.snapCell && drag.valid){
-    tryPlace(idx, drag.snapCell.q, drag.snapCell.r);
+    placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
   } else {
-    // dropped somewhere invalid -> send to tray
-    pieces[idx].placed=false; pieces[idx].anchor=null; pieces[idx]._laid=false;
+    // dropped off the board -> send to tray
+    p.placed=false; p.anchor=null;
   }
   drag=null;
-  layoutTray(true);
+  recompute();
+  layoutTray();
   updateCount();
   checkWin();
   draw();
   e && e.preventDefault();
 }
 
-/* rotate/flip the active piece (dragging or selected) */
+/* rotate the active piece (dragging or selected) */
 function activeIdx(){ return drag? drag.idx : selected; }
 function rotateActive(dir){
   const i=activeIdx(); if(i<0) return;
@@ -559,9 +554,9 @@ function rotateActive(dir){
   if(wasPlaced) removeFromBoard(i);
   p.rot=((p.rot + (dir>0?1:5))%6);
   // keep it on the board at the same spot if it still fits, else drop to tray
-  if(wasPlaced && !tryPlace(i, anchor.q, anchor.r)){ p.placed=false; p.anchor=null; p._laid=false; }
+  if(wasPlaced) placeAt(i, anchor.q, anchor.r);
   if(drag) updateSnap();
-  layoutTray(true);
+  layoutTray();
   updateCount();
   draw();
 }
@@ -582,8 +577,8 @@ function cyrb53(str, seed){        // fast 53-bit string hash
   h2=Math.imul(h2^(h2>>>16),2246822507); h2^=Math.imul(h1^(h1>>>13),3266489909);
   return 4294967296*(2097151&h2)+(h1>>>0);
 }
-function solutionKey(){ // stable string: which piece fills each board cell
-  return boardCells.map(([q,r])=> pieces[occ.get(q+","+r)].id ).join('|');
+function solutionKey(){ // stable string: which piece fills each board cell (one per cell when solved)
+  return boardCells.map(([q,r])=>{ const a=cover.get(q+","+r); return a&&a.length? pieces[a[0]].id : '_'; }).join('|');
 }
 function currentLayout(){ return pieces.map(p=>({color:p.color, cells:placedCells(p)})); }
 function loadCollection(){ try{ return JSON.parse(localStorage.getItem('hexSolvedV1')||'{}'); }catch(e){ return {}; } }
@@ -591,7 +586,8 @@ function saveCollection(c){ try{ localStorage.setItem('hexSolvedV1', JSON.string
 function updateSolCount(){ document.getElementById('solCount').textContent=Object.keys(loadCollection()).length; }
 
 function checkWin(){
-  if(occ.size===boardCells.length && pieces.every(p=>p.placed)){
+  // solved == every board cell covered exactly once (no gaps, no overlaps) with all pieces down
+  if(overlapCells.size===0 && cover.size===boardCells.length && pieces.every(p=>p.placed)){
     solvedFlag=true;
     const secs=startTime?Math.round((Date.now()-startTime)/1000):0;
     const mm=String(Math.floor(secs/60)).padStart(2,'0'), ss=String(secs%60).padStart(2,'0');
@@ -683,31 +679,25 @@ async function openCollection(){
 }
 function newGame(shuffleOnly){
   document.getElementById('win').style.display='none';
-  solvedFlag=false; startTime=null; selected=-1; drag=null; boardDrag=null; boardAngle=0;
+  solvedFlag=false; startTime=null; selected=-1; drag=null;
   if(!shuffleOnly) makePieces();
-  else { // clear board, randomize orientations
-    occ.clear();
-    for(const p of pieces){ p.placed=false; p.anchor=null; }
-  }
+  else for(const p of pieces){ p.placed=false; p.anchor=null; }
   for(const p of pieces){
     p.rot=Math.floor(Math.random()*6);
     p.flip=false;
-    p._laid=false;
   }
-  layoutTray(false);
+  recompute();
+  layoutTray();
   updateCount(); draw();
 }
 function solveAll(){
   document.getElementById('win').style.display='none';
-  occ.clear();
   for(const p of pieces){
-    p.rot=0; p.flip=false; p.placed=false; p.anchor=null;
-    // solution cells are absolute; anchor = base[0]
-    const anchor={q:p.base[0][0], r:p.base[0][1]};
-    // orientedOffsets with rot0/flip false == base - base[0]
-    p.anchor=anchor; p.placed=true;
-    for(const c of placedCells(p)) occ.set(c[0]+","+c[1], pieces.indexOf(p));
+    p.rot=0; p.flip=false;
+    // solution cells are absolute; with rot0/flip false, orientedOffsets == base - base[0]
+    p.anchor={q:p.base[0][0], r:p.base[0][1]}; p.placed=true;
   }
+  recompute();
   selected=-1;
   updateCount();
   draw(); // reveal solution without firing the win congratulation
