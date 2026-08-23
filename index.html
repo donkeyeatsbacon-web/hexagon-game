@@ -463,10 +463,12 @@ function draw(){
     drawPieceHexes(orientedOffsets(p), p.tray.x, p.tray.y, traySize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
-  // free-floating dragging piece (off the board, drawn last on top)
+  // free-floating dragging piece (off the board, drawn last on top).
+  // keep the grabbed hexagon under the pointer so the enlarged piece doesn't float away.
   if(drag && !drag.snapCell){
     const p=pieces[drag.idx];
-    drawPieceHexes(orientedOffsets(p), drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
+    const co=orientedOffsets(p)[drag.clickIdx], cp=axialToPixel(co[0],co[1],boardSize*0.9);
+    drawPieceHexes(orientedOffsets(p), drag.mx-cp.x, drag.my-cp.y, boardSize*0.9, p.color, 0.95, '#ffffff');
   }
 
   // press-and-hold action menu (rotate-left / rotate-right / flip), drawn on top
@@ -644,14 +646,16 @@ function onMove(e){
   e.preventDefault();
 }
 function updateSnap(){
-  // snap the grabbed cell to the board grid whenever any hex would land on the board
-  // (or the pointer is hovering it) — a single on-board hex is enough to place at board size
+  // the grabbed hexagon snaps to the grid cell under the pointer (so it stays under the finger);
+  // the anchor (cell[0]) is derived from that. A single on-board hex is enough to place.
   const cell=screenToBoardCell(drag.mx, drag.my);
-  const valid=validAt(drag.idx, cell.q, cell.r);   // at least one hex on the board
+  const co=gridOffsets(pieces[drag.idx])[drag.clickIdx];   // clicked hex offset, grid space
+  const anchor={q:cell.q-co[0], r:cell.r-co[1]};           // put the clicked hex at `cell`
+  const valid=validAt(drag.idx, anchor.q, anchor.r);       // at least one hex on the board
   const near = boardSet.has(cell.q+","+cell.r) ||
      Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.1;
   if(valid || near){
-    drag.snapCell={q:cell.q,r:cell.r};
+    drag.snapCell=anchor;
     drag.valid=valid;
   } else {
     drag.snapCell=null; drag.valid=false;
@@ -680,9 +684,10 @@ function onUp(e){
   } else if(drag.snapCell && drag.valid){
     placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
   } else {
-    // dropped off the board -> leave it right where it was released (free scatter)
+    // dropped off the board -> leave it where released, grabbed hex under the pointer
     p.placed=false; p.anchor=null;
-    p.tray.x=drag.mx; p.tray.y=drag.my;
+    const co=orientedOffsets(p)[drag.clickIdx], cp=axialToPixel(co[0],co[1],traySize);
+    p.tray.x=drag.mx-cp.x; p.tray.y=drag.my-cp.y;
   }
   drag=null;
   recompute();

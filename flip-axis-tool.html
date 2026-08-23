@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Flip-Axis Chooser · Hexagon Puzzle</title>
+<style>
+  :root{ --bg:#1b1d24; --panel:#242730; --panel2:#2c3039; --ink:#eef1f6; --muted:#9aa3b2;
+         --accent:#f0a020; --line:#3a3f4b; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;
+    background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;}
+  header h1{font-size:17px;margin:0;font-weight:800;letter-spacing:.3px;}
+  header .sub{color:var(--muted);font-size:12.5px;max-width:560px;}
+  .spacer{flex:1;}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
+  .btn:hover{background:#333844;border-color:#4a505e;}
+  .btn.primary{background:var(--accent);color:#20160a;border-color:var(--accent);}
+  select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;}
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+    gap:14px;padding:18px;align-content:start;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;}
+  .card .top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .card .dot{width:14px;height:14px;border-radius:4px;border:1px solid rgba(255,255,255,.35);}
+  .card .pid{font-weight:800;font-size:14px;}
+  .card .axname{margin-left:auto;color:var(--muted);font-size:12px;}
+  .card canvas{width:100%;height:150px;display:block;background:#181a20;border-radius:8px;
+    border:1px solid var(--line);}
+  .axes{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:10px;}
+  .ax{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 0 3px;
+    cursor:pointer;text-align:center;user-select:none;}
+  .ax:hover{border-color:#4a505e;}
+  .ax.sel{border-color:var(--accent);background:#3a3320;}
+  .ax svg{display:block;margin:0 auto;}
+  .ax .deg{font-size:9.5px;color:var(--muted);margin-top:1px;}
+  .ax.sel .deg{color:var(--accent);}
+  dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;
+    padding:0;max-width:620px;width:92%;}
+  dialog .dtop{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);}
+  dialog h3{margin:0;font-size:15px;}
+  dialog textarea{width:100%;height:260px;border:none;background:#12141a;color:var(--ink);
+    font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:14px;resize:vertical;}
+  dialog .dbtns{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line);}
+  .legend{color:var(--muted);font-size:12px;}
+  .legend b{color:var(--ink);}
+</style>
+</head>
+<body>
+<header>
+  <h1>⬡ Flip-Axis Chooser</h1>
+  <span class="sub">Pick the mirror axis each piece flips across. Solid = flipped result,
+    faint outline = original, dashed line = the axis. Choose whatever looks most natural, then Export.</span>
+  <span class="spacer"></span>
+  <label class="legend">Set all: <select id="allSel"></select></label>
+  <button class="btn" id="reset">Reset</button>
+  <button class="btn primary" id="export">Export JSON</button>
+</header>
+<div id="grid"></div>
+
+<dialog id="exportDlg">
+  <div class="dtop"><h3>Per-piece flip axes</h3><span class="legend spacer"></span>
+    <button class="btn" id="copyBtn">Copy</button>
+    <button class="btn" id="dlBtn">Download</button>
+  </div>
+  <textarea id="exportText" readonly></textarea>
+  <div class="dbtns"><button class="btn" id="closeDlg">Close</button></div>
+</dialog>
+
+<script>
+const PIECE_DATA = [{"id":"P0","color":"#F20C0C","solution":[[2,0],[3,-1],[3,0],[3,1],[4,0]]},{"id":"P1","color":"#0000FF","solution":[[0,-4],[0,-3],[1,-4],[1,-3],[1,-2]]},{"id":"P2","color":"#00FF00","solution":[[2,-1],[3,-2],[4,-2],[4,-1]]},{"id":"P3","color":"#0CC4F2","solution":[[-4,0],[-4,1],[-4,2],[-4,3]]},{"id":"P4","color":"#F20CAD","solution":[[-2,-2],[-2,-1],[-2,0],[-1,0],[0,-1]]},{"id":"P5","color":"#FFD632","solution":[[0,1],[0,2],[1,0],[1,1],[1,2]]},{"id":"P6","color":"#0CF2AD","solution":[[-4,4],[-3,3],[-3,4]]},{"id":"P7","color":"#327AFF","solution":[[-3,-1],[-3,0],[-3,1],[-2,1]]},{"id":"P8","color":"#E500FF","solution":[[-3,2],[-2,2],[-2,3],[-1,1]]},{"id":"P9","color":"#F43D6B","solution":[[0,4],[1,3],[2,1],[2,2]]},{"id":"P10","color":"#CBFF00","solution":[[3,-4],[3,-3],[4,-4],[4,-3]]},{"id":"P11","color":"#FF8E32","solution":[[-2,4],[-1,2],[-1,3],[-1,4],[0,3]]},{"id":"P12","color":"#00FEFF","solution":[[0,0],[1,-1],[2,-4],[2,-3],[2,-2]]},{"id":"P13","color":"#3D46F4","solution":[[-1,-3],[-1,-2],[-1,-1],[0,-2]]}];
+
+const SQRT3=Math.sqrt(3);
+function axialToPixel(q,r,size){ return {x:size*SQRT3*(q+r/2), y:size*1.5*r}; }
+
+/* The six lattice-preserving mirror reflections, as axial matrices (q,r)->(a*q+b*r, c*q+d*r).
+   Combined with the game's 6 rotations these cover every mirror image; the chosen one just
+   controls which axis (and therefore how "natural") the flip looks. */
+const AXES = [
+  {id:'A', mat:[[0,1],[1,0]]},
+  {id:'B', mat:[[-1,-1],[0,1]]},
+  {id:'C', mat:[[1,1],[0,-1]]},
+  {id:'D', mat:[[1,0],[-1,-1]]},
+  {id:'E', mat:[[-1,0],[1,1]]},
+  {id:'F', mat:[[0,-1],[-1,0]]},
+];
+// screen mirror angle of each axis: P = M · mat · M⁻¹ is a pixel reflection [[c,s],[s,-c]] (2φ = atan2(s,c))
+const M=[[SQRT3, SQRT3/2],[0,1.5]], Minv=[[1/SQRT3,-1/3],[0,2/3]];
+function mul(A,B){ return [[A[0][0]*B[0][0]+A[0][1]*B[1][0], A[0][0]*B[0][1]+A[0][1]*B[1][1]],
+                           [A[1][0]*B[0][0]+A[1][1]*B[1][0], A[1][0]*B[0][1]+A[1][1]*B[1][1]]]; }
+AXES.forEach(ax=>{
+  const P=mul(mul(M,ax.mat),Minv);
+  const cos2=(P[0][0]-P[1][1])/2, sin2=(P[0][1]+P[1][0])/2;   // reflection: P00=-P11, P01=P10
+  ax.cos2=cos2; ax.sin2=sin2;
+  ax.phi=0.5*Math.atan2(sin2,cos2);                          // mirror-line angle (radians)
+  let deg=Math.round(ax.phi*180/Math.PI); deg=((deg%180)+180)%180;
+  ax.deg=deg;
+});
+
+const state={};                       // pieceId -> axis index
+PIECE_DATA.forEach(p=>state[p.id]=0);
+
+function drawHex(ctx,cx,cy,size,fill,stroke,lw){
+  ctx.beginPath();
+  for(let i=0;i<6;i++){ const a=Math.PI/180*(30+60*i);
+    const x=cx+size*0.94*Math.cos(a), y=cy+size*0.94*Math.sin(a);
+    if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+  ctx.closePath();
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.lineWidth=lw||1.5;ctx.strokeStyle=stroke;ctx.stroke();}
+}
+function renderCard(p){
+  const cv=document.getElementById('cv_'+p.id);
+  const ax=AXES[state[p.id]];
+  const DPR=Math.min(window.devicePixelRatio||1,2);
+  const Wc=cv.clientWidth, Hc=cv.clientHeight;
+  cv.width=Wc*DPR; cv.height=Hc*DPR;
+  const ctx=cv.getContext('2d'); ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,Wc,Hc);
+
+  // size the piece to fit
+  const cells=p.solution;
+  let R=16;
+  // original pixel positions + centroid
+  const orig=cells.map(c=>axialToPixel(c[0],c[1],R));
+  const ctr={x:orig.reduce((s,o)=>s+o.x,0)/orig.length, y:orig.reduce((s,o)=>s+o.y,0)/orig.length};
+  // flipped = mirror each cell across the axis line through the centroid (in place)
+  const flip=orig.map(o=>{ const dx=o.x-ctr.x, dy=o.y-ctr.y;
+    return {x:ctr.x + dx*ax.cos2 + dy*ax.sin2, y:ctr.y + dx*ax.sin2 - dy*ax.cos2}; });
+  // fit both sets in the canvas
+  const all=orig.concat(flip);
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  all.forEach(o=>{minx=Math.min(minx,o.x-R);maxx=Math.max(maxx,o.x+R);miny=Math.min(miny,o.y-R);maxy=Math.max(maxy,o.y+R);});
+  const scale=Math.min((Wc-16)/(maxx-minx), (Hc-16)/(maxy-miny), 1.6);
+  const ox=Wc/2 - ((minx+maxx)/2)*scale, oy=Hc/2 - ((miny+maxy)/2)*scale;
+  const T=o=>({x:ox+o.x*scale, y:oy+o.y*scale});
+  const rs=R*scale;
+
+  // axis line through centroid
+  const c=T(ctr); const dx=Math.cos(ax.phi), dy=Math.sin(ax.phi); const L=Math.max(Wc,Hc);
+  ctx.save(); ctx.setLineDash([5,4]); ctx.strokeStyle='rgba(240,160,32,.75)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(c.x-dx*L,c.y-dy*L); ctx.lineTo(c.x+dx*L,c.y+dy*L); ctx.stroke(); ctx.restore();
+
+  // original (faint outline)
+  orig.forEach(o=>{ const t=T(o); drawHex(ctx,t.x,t.y,rs,null,'rgba(255,255,255,.28)',1.5); });
+  // flipped (solid colour)
+  flip.forEach(o=>{ const t=T(o); drawHex(ctx,t.x,t.y,rs,p.color,'rgba(255,255,255,.5)',1.5); });
+
+  // update axis label + selected button
+  document.getElementById('axn_'+p.id).textContent='Axis '+ax.id+' · '+ax.deg+'°';
+  document.querySelectorAll('#axrow_'+p.id+' .ax').forEach((b,i)=>b.classList.toggle('sel',i===state[p.id]));
+}
+
+function axIcon(deg){
+  // a little mirror-line glyph at the axis angle
+  const r=9, a=deg*Math.PI/180, dx=Math.cos(a)*r, dy=Math.sin(a)*r;
+  return '<svg width="22" height="20" viewBox="-11 -10 22 20">'
+    +'<line x1="'+(-dx)+'" y1="'+(-dy)+'" x2="'+dx+'" y2="'+dy+'" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+}
+
+function buildAllSelect(){
+  const sel=document.getElementById('allSel');
+  sel.innerHTML='<option value="">—</option>'+AXES.map((a,i)=>'<option value="'+i+'">Axis '+a.id+' · '+a.deg+'°</option>').join('');
+  sel.onchange=()=>{ if(sel.value==='')return; PIECE_DATA.forEach(p=>state[p.id]=+sel.value); PIECE_DATA.forEach(renderCard); sel.value=''; };
+}
+
+function build(){
+  const grid=document.getElementById('grid');
+  PIECE_DATA.forEach(p=>{
+    const card=document.createElement('div'); card.className='card';
+    card.innerHTML=
+      '<div class="top"><span class="dot" style="background:'+p.color+'"></span>'
+      +'<span class="pid">'+p.id+'</span><span class="axname" id="axn_'+p.id+'"></span></div>'
+      +'<canvas id="cv_'+p.id+'"></canvas>'
+      +'<div class="axes" id="axrow_'+p.id+'">'
+      + AXES.map((a,i)=>'<div class="ax" data-i="'+i+'" title="Axis '+a.id+' — mirror line '+a.deg+'°">'
+          +axIcon(a.deg)+'<div class="deg">'+a.deg+'°</div></div>').join('')
+      +'</div>';
+    grid.appendChild(card);
+    card.querySelectorAll('.ax').forEach(b=>b.onclick=()=>{ state[p.id]=+b.dataset.i; renderCard(p); });
+  });
+  PIECE_DATA.forEach(renderCard);
+}
+
+function exportJSON(){
+  const out={ note:"Per-piece flip axis. mat is the axial reflection (q,r)->(a*q+b*r, c*q+d*r).",
+    axes:{} };
+  PIECE_DATA.forEach(p=>{ const ax=AXES[state[p.id]]; out.axes[p.id]={axis:ax.id, deg:ax.deg, mat:ax.mat}; });
+  return JSON.stringify(out,null,2);
+}
+document.getElementById('export').onclick=()=>{
+  document.getElementById('exportText').value=exportJSON();
+  document.getElementById('exportDlg').showModal();
+};
+document.getElementById('closeDlg').onclick=()=>document.getElementById('exportDlg').close();
+document.getElementById('copyBtn').onclick=()=>{ const t=document.getElementById('exportText');
+  t.select(); navigator.clipboard&&navigator.clipboard.writeText(t.value); };
+document.getElementById('dlBtn').onclick=()=>{ const blob=new Blob([exportJSON()],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='flip-axes.json'; a.click(); };
+document.getElementById('reset').onclick=()=>{ PIECE_DATA.forEach(p=>state[p.id]=0); PIECE_DATA.forEach(renderCard); };
+
+buildAllSelect();
+build();
+window.addEventListener('resize',()=>PIECE_DATA.forEach(renderCard));
+</script>
+</body>
+</html>
