@@ -101,6 +101,7 @@
       <span><kbd>drag</kbd> move piece</span>
       <span><kbd>tap</kbd> / <kbd>R</kbd> / <kbd>right-click</kbd> rotate</span>
       <span><kbd>double-click</kbd> flip</span>
+      <span><kbd>drag ring</kbd> turn board</span>
       <span>overlaps flash <span style="color:#ff5a44">red</span></span>
     </div>
     <div id="win"><div class="card">
@@ -206,6 +207,8 @@ let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
 let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
 let drag = null;        // {idx, mx,my, moved, ...}
 let lastTap = null;     // {t,idx} last no-move tap, for double-click(-tap) flip detection
+let boardAngle = 0;     // whole-board rotation (radians), turned via the grip ring
+let boardDrag = null;   // {lastAng} while turning the board by its border ring
 let selected = -1;
 let startTime = null, solvedFlag = false;
 
@@ -232,7 +235,7 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let DPR=1, W=0, H=0;
 let boardSize=30, boardOx=0, boardOy=0;   // board hex size + pixel origin (center)
-let boardCircumR=0;                        // board circumradius in px
+let boardCircumR=0, borderInner=0, borderOuter=0;  // board circumradius + grip-ring radii (px)
 let traySize=18;                           // scattered-piece hex size
 
 function resize(){
@@ -247,6 +250,8 @@ function resize(){
   boardCircumR = 0;
   for(const [q,r] of boardCells){ const p=axialToPixel(q,r,boardSize); boardCircumR=Math.max(boardCircumR,Math.hypot(p.x,p.y)); }
   boardCircumR += boardSize;      // include hex extent
+  borderInner = boardCircumR + Math.max(5, boardSize*0.30);   // grip ring hugs the board
+  borderOuter = borderInner + Math.max(14, boardSize*0.85);
   layoutTray();
   draw();
 }
@@ -280,7 +285,7 @@ function layoutTray(){
   let chosen=null;
   for(let size=Math.max(6,boardSize); size>=4; size*=0.9){
     const slot = maxExt*size + size*0.5;      // per-piece footprint diameter
-    const r0   = boardCircumR + slot*0.5 + 4; // first ring sits just off the board
+    const r0   = borderOuter + slot*0.5 + 4;  // first ring sits just outside the grip border
     const rowH = slot*0.88;
     const rings=[]; let cap=0;
     for(let r=r0; r+slot*0.5<=Rmax; r+=rowH){
@@ -291,7 +296,7 @@ function layoutTray(){
     if(cap>=N){ chosen={size,slot,rings}; break; }
   }
   if(!chosen){ const size=4, slot=maxExt*size+size*0.5;
-    chosen={size,slot,rings:[{r:boardCircumR+slot*0.5+4, per:N}]}; }
+    chosen={size,slot,rings:[{r:borderOuter+slot*0.5+4, per:N}]}; }
   traySize=chosen.size;
   let i=0;
   chosen.rings.forEach((ring,ri)=>{
@@ -370,23 +375,48 @@ function drawPieceHexes(cells, cx, cy, size, color, alpha, highlight){
 
 // red overlay on a single board cell (used for overlap flash + bad preview cells)
 function markCellRed(q, r, alpha){
-  const p=axialToPixel(q,r,boardSize);
-  if(alpha){ ctx.globalAlpha=alpha; drawCellHex(boardOx+p.x, boardOy+p.y-boardSize*0.07, boardSize, '#e5533c', null); }
-  ctx.globalAlpha=1; drawCellHex(boardOx+p.x, boardOy+p.y-boardSize*0.07, boardSize, null, '#ff2a1a', Math.max(2,boardSize*0.12));
+  const p=axialToPixel(q,r,boardSize);   // drawn inside the rotated board frame (origin at centre)
+  if(alpha){ ctx.globalAlpha=alpha; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, '#e5533c', null); }
+  ctx.globalAlpha=1; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, null, '#ff2a1a', Math.max(2,boardSize*0.12));
+}
+// the grippable knurled ring around the board (drawn inside the rotated frame so it spins)
+function drawBorder(hot){
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0,0,borderOuter,0,2*Math.PI);
+  ctx.arc(0,0,borderInner,0,2*Math.PI,true);
+  ctx.fillStyle = hot? '#3a4152' : '#2b2f39';
+  ctx.fill('evenodd');
+  ctx.lineWidth=Math.max(1.5,boardSize*0.06); ctx.strokeStyle = hot? '#5b6478' : '#3a3f4b';
+  ctx.beginPath(); ctx.arc(0,0,borderOuter,0,2*Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,borderInner,0,2*Math.PI); ctx.stroke();
+  // radial knurl ticks — they move as the board turns, showing the rotation
+  ctx.lineWidth=Math.max(1.5,boardSize*0.07); ctx.strokeStyle = hot? '#b3bccd' : '#565d6d';
+  const N=24;
+  for(let i=0;i<N;i++){ const a=i/N*2*Math.PI, c=Math.cos(a), s=Math.sin(a);
+    ctx.beginPath(); ctx.moveTo(borderInner*c, borderInner*s); ctx.lineTo(borderOuter*c, borderOuter*s); ctx.stroke(); }
+  ctx.restore();
 }
 function draw(){
   ctx.clearRect(0,0,W,H);
 
+  // board, grip ring and placed pieces all render in the rotated board frame
+  ctx.save();
+  ctx.translate(boardOx, boardOy);
+  ctx.rotate(boardAngle);
+
+  drawBorder(!!boardDrag);
+
   // board empty cells
   for(const [q,r] of boardCells){
     const p=axialToPixel(q,r,boardSize);
-    drawCellHex(boardOx+p.x, boardOy+p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
+    drawCellHex(p.x, p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
   }
 
   // placed pieces (overlaps allowed — they just stack)
   pieces.forEach((p,idx)=>{
     if(!p.placed || (drag && drag.idx===idx)) return;
-    drawPieceHexes(placedCells(p), boardOx, boardOy, boardSize, p.color, 1, selected===idx?'#ffffff':null);
+    drawPieceHexes(placedCells(p), 0, 0, boardSize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
   // flash every cell where two or more pieces intersect
@@ -401,13 +431,14 @@ function draw(){
   if(drag && drag.snapCell){
     const p=pieces[drag.idx];
     const cells = orientedOffsets(p).map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
-    drawPieceHexes(cells, boardOx, boardOy, boardSize, p.color, drag.valid?0.95:0.6, '#ffffff');
-    // outline cells that are off-board (can't drop) or would overlap an existing piece
+    drawPieceHexes(cells, 0, 0, boardSize, p.color, drag.valid?0.95:0.6, '#ffffff');
+    // outline cells that would overlap an existing piece (off-board overhang is allowed)
     ctx.save();
     for(const c of cells){ const k=c[0]+','+c[1];
-      if(!boardSet.has(k) || cover.has(k)) markCellRed(c[0],c[1],0); }
+      if(cover.has(k)) markCellRed(c[0],c[1],0); }
     ctx.restore();
   }
+  ctx.restore();
 
   // tray pieces
   pieces.forEach((p,idx)=>{
@@ -432,6 +463,9 @@ function evtPos(e){
   const t = e.touches? e.touches[0] : e;
   return { x:t.clientX-rect.left, y:t.clientY-rect.top };
 }
+function rotatePt(x,y,ang){ const c=Math.cos(ang), s=Math.sin(ang); return {x:x*c-y*s, y:x*s+y*c}; }
+// screen pixel -> board axial cell, undoing the whole-board rotation
+function screenToBoardCell(x,y){ const p=rotatePt(x-boardOx, y-boardOy, -boardAngle); return pixelToAxial(p.x, p.y, boardSize); }
 // find piece under a point. Returns {idx, kind:'board'|'tray'} or null
 function pick(px,py){
   // check dragging-priority: placed pieces on board first if over board, else tray
@@ -444,7 +478,7 @@ function pick(px,py){
     if(offs.some(o=>o[0]===local.q&&o[1]===local.r)) return {idx:i,kind:'tray'};
   }
   // placed pieces — return the topmost (last-drawn) piece covering this cell
-  const cell=pixelToAxial(px-boardOx, py-boardOy, boardSize);
+  const cell=screenToBoardCell(px, py);
   const a=cover.get(cell.q+","+cell.r);
   if(a && a.length) return {idx:Math.max(...a), kind:'board'};
   return null;
@@ -478,31 +512,62 @@ function placeAt(idx, cellQ, cellR){
   recompute();
   return true;
 }
-// valid == the whole piece lands on board cells (occupancy is ignored — overlaps are ok)
+// valid == at least ONE hex lands on the board (the rest may hang off the edge).
+// Overlaps are ignored (allowed). A partly-on-board piece stays at full board size.
 function validAt(idx, cellQ, cellR){
   const offs=orientedOffsets(pieces[idx]);
-  return offs.every(o=>boardSet.has((cellQ+o[0])+","+(cellR+o[1])));
+  return offs.some(o=>boardSet.has((cellQ+o[0])+","+(cellR+o[1])));
 }
 
 function onDown(e){
   if(solvedFlag) return;
   const {x,y}=evtPos(e);
   const hit=pick(x,y);
-  if(!hit){ selected=-1; draw(); return; }
+  if(!hit){
+    // grabbed the grip ring (and not a piece)? -> start turning the whole board
+    const d=Math.hypot(x-boardOx, y-boardOy);
+    if(d>=borderInner-4 && d<=borderOuter+4){
+      boardDrag={lastAng:Math.atan2(y-boardOy, x-boardOx)};
+      selected=-1; draw(); e.preventDefault(); return;
+    }
+    selected=-1; draw(); return;
+  }
   if(startTime===null) startTime=Date.now();
-  const idx=hit.idx;
+  const idx=hit.idx, p=pieces[idx];
   selected=idx;
-  const wasPlaced=pieces[idx].placed;
-  const origAnchor=wasPlaced?{q:pieces[idx].anchor.q,r:pieces[idx].anchor.r}:null;
+  const wasPlaced=p.placed;
+  const origAnchor=wasPlaced?{q:p.anchor.q,r:p.anchor.r}:null;
+  // work out which hexagon of the piece was grabbed + its fixed pivot, so a tap can
+  // rotate/flip the piece AROUND that hexagon (keeping it pinned in place)
+  const offs=orientedOffsets(p);
+  let clickIdx=0, pivotCell=null, pivotPx=null;
+  if(hit.kind==='board'){
+    const c=screenToBoardCell(x, y);
+    clickIdx=offs.findIndex(o=>o[0]===c.q-origAnchor.q && o[1]===c.r-origAnchor.r);
+    pivotCell={q:c.q, r:c.r};
+  } else {
+    const c=pixelToAxial(x-p.tray.x, y-p.tray.y, traySize);
+    clickIdx=offs.findIndex(o=>o[0]===c.q && o[1]===c.r);
+    const cp=axialToPixel(c.q, c.r, traySize);
+    pivotPx={x:p.tray.x+cp.x, y:p.tray.y+cp.y};
+  }
+  if(clickIdx<0) clickIdx=0;
   if(hit.kind==='board') removeFromBoard(idx);
   // anchor grab: keep piece under cursor, cell[0] follows pointer
   drag={idx, mx:x, my:y, snapCell:null, valid:false, moved:false, downX:x, downY:y,
-        wasPlaced, origAnchor};
+        wasPlaced, origAnchor, clickIdx, pivotCell, pivotPx};
   updateSnap();
   draw();
   e.preventDefault();
 }
 function onMove(e){
+  if(boardDrag){
+    const {x,y}=evtPos(e);
+    const ang=Math.atan2(y-boardOy, x-boardOx);
+    let d=ang-boardDrag.lastAng; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
+    boardAngle+=d; boardDrag.lastAng=ang;
+    draw(); e.preventDefault(); return;
+  }
   if(!drag) return;
   const {x,y}=evtPos(e);
   if(Math.hypot(x-drag.downX,y-drag.downY)>8) drag.moved=true;
@@ -512,21 +577,23 @@ function onMove(e){
   e.preventDefault();
 }
 function updateSnap(){
-  // if pointer is near/over the board, snap the grabbed (first) cell to nearest board cell
-  const cell=pixelToAxial(drag.mx-boardOx, drag.my-boardOy, boardSize);
-  const overBoard = boardSet.has(cell.q+","+cell.r) ||
-     Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.02;
-  if(overBoard){
+  // snap the grabbed cell to the board grid whenever any hex would land on the board
+  // (or the pointer is hovering it) — a single on-board hex is enough to place at board size
+  const cell=screenToBoardCell(drag.mx, drag.my);
+  const valid=validAt(drag.idx, cell.q, cell.r);   // at least one hex on the board
+  const near = boardSet.has(cell.q+","+cell.r) ||
+     Math.hypot(drag.mx-boardOx, drag.my-boardOy) < boardCircumR*1.1;
+  if(valid || near){
     drag.snapCell={q:cell.q,r:cell.r};
-    drag.valid=validAt(drag.idx, cell.q, cell.r);
+    drag.valid=valid;
   } else {
     drag.snapCell=null; drag.valid=false;
   }
 }
 function onUp(e){
+  if(boardDrag){ boardDrag=null; draw(); e && e.preventDefault(); return; }
   if(!drag) return;
   const idx=drag.idx, p=pieces[idx];
-  let trayChanged=false;   // only re-scatter the tray when a piece enters/leaves it
   if(!drag.moved){
     const now=Date.now();
     if(lastTap && now-lastTap.t<320 && lastTap.idx===idx){
@@ -540,20 +607,27 @@ function onUp(e){
       p.rot=(p.rot+1)%6;
       lastTap={t:now, idx};
     }
-    // if it was on the board, drop it back at the same spot (unless it now runs off-board)
-    if(drag.wasPlaced) placeAt(idx, drag.origAnchor.q, drag.origAnchor.r);
-    // NB: no layoutTray() here — keep the piece under the cursor so a 2nd tap lands on it
+    // pivot around the grabbed hexagon: keep that cell pinned where it was
+    const co=orientedOffsets(p)[drag.clickIdx];
+    if(drag.wasPlaced){
+      // re-place so the clicked board cell is unchanged; if the rest runs off-board, free-drop near cursor
+      if(!placeAt(idx, drag.pivotCell.q-co[0], drag.pivotCell.r-co[1])){
+        const cp=axialToPixel(co[0],co[1],traySize);
+        p.tray.x=drag.mx-cp.x; p.tray.y=drag.my-cp.y;
+      }
+    } else {
+      const cp=axialToPixel(co[0],co[1],traySize);
+      p.tray.x=drag.pivotPx.x-cp.x; p.tray.y=drag.pivotPx.y-cp.y;
+    }
   } else if(drag.snapCell && drag.valid){
     placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
-    trayChanged=true;
   } else {
-    // dropped off the board -> send to tray
+    // dropped off the board -> leave it right where it was released (free scatter)
     p.placed=false; p.anchor=null;
-    trayChanged=true;
+    p.tray.x=drag.mx; p.tray.y=drag.my;
   }
   drag=null;
   recompute();
-  if(trayChanged) layoutTray();
   updateCount();
   checkWin();
   draw();
@@ -572,7 +646,6 @@ function rotateActive(dir){
   // keep it on the board at the same spot if it still fits, else drop to tray
   if(wasPlaced) placeAt(i, anchor.q, anchor.r);
   if(drag) updateSnap();
-  layoutTray();
   updateCount();
   draw();
 }
@@ -602,8 +675,9 @@ function saveCollection(c){ try{ localStorage.setItem('hexSolvedV1', JSON.string
 function updateSolCount(){ document.getElementById('solCount').textContent=Object.keys(loadCollection()).length; }
 
 function checkWin(){
-  // solved == every board cell covered exactly once (no gaps, no overlaps) with all pieces down
-  if(overlapCells.size===0 && cover.size===boardCells.length && pieces.every(p=>p.placed)){
+  // solved == every board cell covered exactly once, nothing overlapping or hanging off-board
+  let allOnBoard=true; for(const k of cover.keys()) if(!boardSet.has(k)){ allOnBoard=false; break; }
+  if(overlapCells.size===0 && allOnBoard && cover.size===boardCells.length && pieces.every(p=>p.placed)){
     solvedFlag=true;
     const secs=startTime?Math.round((Date.now()-startTime)/1000):0;
     const mm=String(Math.floor(secs/60)).padStart(2,'0'), ss=String(secs%60).padStart(2,'0');
@@ -695,7 +769,7 @@ async function openCollection(){
 }
 function newGame(shuffleOnly){
   document.getElementById('win').style.display='none';
-  solvedFlag=false; startTime=null; selected=-1; drag=null;
+  solvedFlag=false; startTime=null; selected=-1; drag=null; boardDrag=null; boardAngle=0;
   if(!shuffleOnly) makePieces();
   else for(const p of pieces){ p.placed=false; p.anchor=null; }
   for(const p of pieces){
