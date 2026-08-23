@@ -90,17 +90,17 @@
     <span class="pill">Placed <b id="count">0</b>/<b id="total">0</b></span>
     <button class="btn" id="rotL" title="Rotate left">⟲</button>
     <button class="btn" id="rotR" title="Rotate right">⟳</button>
+    <button class="btn" id="flip" title="Flip selected piece">⇋ Flip</button>
     <button class="btn" id="shuffle">Shuffle</button>
     <button class="btn" id="reset">Reset</button>
-    <button class="btn" id="solve">Solve</button>
     <button class="btn" id="solutions">🏅 My Solutions (<b id="solCount">0</b>)</button>
   </header>
   <div id="stage">
     <canvas id="c"></canvas>
     <div class="hint">
       <span><kbd>drag</kbd> move piece</span>
-      <span><kbd>tap</kbd> / <kbd>R</kbd> / <kbd>right-click</kbd> rotate</span>
-      <span><kbd>double-click</kbd> flip</span>
+      <span><kbd>tap</kbd> / <kbd>R</kbd> rotate</span>
+      <span><kbd>hold</kbd> rotate/flip menu</span>
       <span><kbd>drag ring</kbd> turn board</span>
       <span>overlaps flash <span style="color:#ff5a44">red</span></span>
     </div>
@@ -110,6 +110,8 @@
       <div id="nameBox">
         <div id="approvedName"></div>
         <div id="nameSubmit">
+          <input id="hpWebsite" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
+                 style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0" />
           <div class="row">
             <input id="nameInput" maxlength="40" placeholder="Name this solution…" />
             <button class="btn primary" id="submitName">Submit for approval</button>
@@ -137,8 +139,10 @@
 const PIECE_DATA = [{"id":"P0","color":"#F20C0C","solution":[[2,0],[3,-1],[3,0],[3,1],[4,0]]},{"id":"P1","color":"#0000FF","solution":[[0,-4],[0,-3],[1,-4],[1,-3],[1,-2]]},{"id":"P2","color":"#00FF00","solution":[[2,-1],[3,-2],[4,-2],[4,-1]]},{"id":"P3","color":"#0CC4F2","solution":[[-4,0],[-4,1],[-4,2],[-4,3]]},{"id":"P4","color":"#F20CAD","solution":[[-2,-2],[-2,-1],[-2,0],[-1,0],[0,-1]]},{"id":"P5","color":"#FFD632","solution":[[0,1],[0,2],[1,0],[1,1],[1,2]]},{"id":"P6","color":"#0CF2AD","solution":[[-4,4],[-3,3],[-3,4]]},{"id":"P7","color":"#327AFF","solution":[[-3,-1],[-3,0],[-3,1],[-2,1]]},{"id":"P8","color":"#E500FF","solution":[[-3,2],[-2,2],[-2,3],[-1,1]]},{"id":"P9","color":"#F43D6B","solution":[[0,4],[1,3],[2,1],[2,2]]},{"id":"P10","color":"#CBFF00","solution":[[3,-4],[3,-3],[4,-4],[4,-3]]},{"id":"P11","color":"#FF8E32","solution":[[-2,4],[-1,2],[-1,3],[-1,4],[0,3]]},{"id":"P12","color":"#00FEFF","solution":[[0,0],[1,-1],[2,-4],[2,-3],[2,-2]]},{"id":"P13","color":"#3D46F4","solution":[[-1,-3],[-1,-2],[-1,-1],[0,-2]]}];
 const BOARD_RADIUS = 4;
 
-/* ---------- community solution names (GitHub-backed) ---------- */
-const GH_OWNER='donkeyeatsbacon-web', GH_REPO='hexagon-game', SUBMISSION_LABEL='name-submission';
+/* ---------- community solution names ---------- */
+// Deployed Cloudflare Worker that validates a submission and opens the GitHub issue
+// server-side, so players never need a GitHub login. See worker/README.md.
+const WORKER_URL='https://hexagon-name-submit.YOUR-SUBDOMAIN.workers.dev';
 let approvedNames = {};                 // { solutionId: {name, num, approvedAt} }
 async function loadApprovedNames(){
   try{
@@ -146,17 +150,17 @@ async function loadApprovedNames(){
     if(r.ok) approvedNames = await r.json();
   }catch(e){ /* offline / not published yet — names just won't show */ }
 }
-// open a pre-filled GitHub issue as a submission for owner approval
-function submitNameForApproval(id, num, name, layout){
-  const payload = {id, num, name, layout};
-  const title = 'Name #'+num+': '+name;
-  const body = 'A player proposed a name for a hexagon solution. Approve it in the admin page.\n\n'+
-               '```json\n'+JSON.stringify(payload)+'\n```\n';
-  const url = 'https://github.com/'+GH_OWNER+'/'+GH_REPO+'/issues/new'+
-              '?labels='+encodeURIComponent(SUBMISSION_LABEL)+
-              '&title='+encodeURIComponent(title)+
-              '&body='+encodeURIComponent(body);
-  window.open(url, '_blank', 'noopener');
+// POST the submission to the Worker (no GitHub login needed). Resolves on success, throws on error.
+async function submitNameForApproval(id, num, name, layout){
+  const hp=document.getElementById('hpWebsite');
+  const res = await fetch(WORKER_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ id, num, name, layout, website: hp?hp.value:'' })
+  });
+  let body={}; try{ body=await res.json(); }catch(e){}
+  if(!res.ok || body.error) throw new Error(body.error || ('HTTP '+res.status));
+  return body;
 }
 
 /* ---------- hex math (pointy-top, axial q,r ; cube x=q, z=r, y=-x-z) ---------- */
@@ -206,7 +210,8 @@ let cover = new Map();  // "q,r" -> [piece indices covering this cell] (overlaps
 let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
 let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
 let drag = null;        // {idx, mx,my, moved, ...}
-let lastTap = null;     // {t,idx} last no-move tap, for double-click(-tap) flip detection
+let menu = null;        // {idx, r, buttons:[...]} radial action menu shown after a long-press
+let holdTimer = null;   // setTimeout handle for the press-and-hold that opens the menu
 let boardAngle = 0;     // whole-board rotation (radians), turned via the grip ring
 let boardDrag = null;   // {lastAng} while turning the board by its border ring
 let selected = -1;
@@ -215,18 +220,26 @@ let startTime = null, solvedFlag = false;
 function makePieces(){
   pieces = PIECE_DATA.map(p=>({
     id:p.id, color:p.color, base:p.solution.map(c=>[c[0],c[1]]),
-    rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}
+    rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}, placedK:0
   }));
   cover.clear(); overlapCells.clear();
 }
-// cells of a piece given its current orientation, anchored so cell[0] sits at `anchor`
-function orientedOffsets(p){
-  const t = transformCells(p.base, p.rot, p.flip);
+// board rotation measured in whole 60° steps (the grid is 6-fold symmetric)
+function boardSteps(){ return ((Math.round(boardAngle/(Math.PI/3))%6)+6)%6; }
+// cells of a piece for a given rotation/flip, anchored so cell[0] sits at (0,0)
+function offsetsFor(base, rot, flip){
+  const t = transformCells(base, ((rot%6)+6)%6, flip);
   const o = t[0];
-  return t.map(c=>[c[0]-o[0], c[1]-o[1]]); // first cell at (0,0)
+  return t.map(c=>[c[0]-o[0], c[1]-o[1]]);
 }
+function orientedOffsets(p){ return offsetsFor(p.base, p.rot, p.flip); }             // hand / screen orientation
+// grid cells a placed piece occupies. `placedK` cancels the board rotation that was in
+// effect when it was dropped, so the piece renders in the exact orientation it was placed
+// (dropping never rotates it) while still turning rigidly when the board itself is turned.
+function boardOffsets(p){ return offsetsFor(p.base, p.rot-(p.placedK||0), p.flip); }
+function gridOffsets(p){ return offsetsFor(p.base, p.rot-boardSteps(), p.flip); }     // grid cells if placed right now
 function placedCells(p){
-  const offs = orientedOffsets(p);
+  const offs = boardOffsets(p);
   return offs.map(o=>[p.anchor.q+o[0], p.anchor.r+o[1]]);
 }
 
@@ -395,6 +408,10 @@ function drawBorder(hot){
   const N=24;
   for(let i=0;i<N;i++){ const a=i/N*2*Math.PI, c=Math.cos(a), s=Math.sin(a);
     ctx.beginPath(); ctx.moveTo(borderInner*c, borderInner*s); ctx.lineTo(borderOuter*c, borderOuter*s); ctx.stroke(); }
+  // one accent marker so the board's facing (60° steps) is visible even when empty
+  const midR=(borderInner+borderOuter)/2, mk=(borderOuter-borderInner)*0.42;
+  ctx.fillStyle='#f0a020';
+  ctx.beginPath(); ctx.arc(midR, 0, mk, 0, 2*Math.PI); ctx.fill();
   ctx.restore();
 }
 function draw(){
@@ -427,10 +444,10 @@ function draw(){
     ctx.restore();
   }
 
-  // dragging piece snapped onto the board (preview)
+  // dragging piece snapped onto the board (preview) — grid offsets keep its dropped orientation
   if(drag && drag.snapCell){
     const p=pieces[drag.idx];
-    const cells = orientedOffsets(p).map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
+    const cells = gridOffsets(p).map(o=>[drag.snapCell.q+o[0], drag.snapCell.r+o[1]]);
     drawPieceHexes(cells, 0, 0, boardSize, p.color, drag.valid?0.95:0.6, '#ffffff');
     // outline cells that would overlap an existing piece (off-board overhang is allowed)
     ctx.save();
@@ -450,6 +467,20 @@ function draw(){
   if(drag && !drag.snapCell){
     const p=pieces[drag.idx];
     drawPieceHexes(orientedOffsets(p), drag.mx, drag.my, boardSize*0.9, p.color, 0.95, '#ffffff');
+  }
+
+  // press-and-hold action menu (rotate-left / rotate-right / flip), drawn on top
+  if(menu){
+    ctx.save();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(const b of menu.buttons){
+      ctx.beginPath(); ctx.arc(b.x, b.y, menu.r, 0, 2*Math.PI);
+      ctx.fillStyle='#242730'; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle='#f0a020'; ctx.stroke();
+      ctx.fillStyle='#eef1f6'; ctx.font='bold '+Math.round(menu.r*1.15)+'px -apple-system,system-ui,sans-serif';
+      ctx.fillText(b.glyph, b.x, b.y+1);
+    }
+    ctx.restore();
   }
 }
 // keep the overlap cells pulsing while any intersection exists
@@ -505,29 +536,40 @@ function removeFromBoard(idx){
   p.placed=false; p.anchor=null;
   recompute();
 }
-// place anywhere on the board (overlaps allowed); only refuses to hang off the board
+// place anywhere on the board (overlaps allowed); only refuses to hang off the board.
+// placedK records the board rotation at drop time so the piece keeps its dropped orientation.
 function placeAt(idx, cellQ, cellR){
   if(!validAt(idx, cellQ, cellR)) return false;
-  pieces[idx].placed=true; pieces[idx].anchor={q:cellQ,r:cellR};
+  const p=pieces[idx];
+  p.placedK=boardSteps(); p.placed=true; p.anchor={q:cellQ,r:cellR};
   recompute();
   return true;
 }
 // valid == at least ONE hex lands on the board (the rest may hang off the edge).
 // Overlaps are ignored (allowed). A partly-on-board piece stays at full board size.
 function validAt(idx, cellQ, cellR){
-  const offs=orientedOffsets(pieces[idx]);
+  const offs=gridOffsets(pieces[idx]);   // grid cells the piece would take if dropped now
   return offs.some(o=>boardSet.has((cellQ+o[0])+","+(cellR+o[1])));
 }
 
 function onDown(e){
   if(solvedFlag) return;
   const {x,y}=evtPos(e);
+  if(menu){
+    // a menu is open: a hit on one of its buttons acts; anything else dismisses it
+    const b=menu.buttons.find(bb=>Math.hypot(x-bb.x,y-bb.y)<=menu.r);
+    if(b){
+      reorient(menu.idx, b.action==='rotL'?5:b.action==='rotR'?1:0, b.action==='flip');
+      e.preventDefault(); return;
+    }
+    menu=null;
+  }
   const hit=pick(x,y);
   if(!hit){
     // grabbed the grip ring (and not a piece)? -> start turning the whole board
     const d=Math.hypot(x-boardOx, y-boardOy);
     if(d>=borderInner-4 && d<=borderOuter+4){
-      boardDrag={lastAng:Math.atan2(y-boardOy, x-boardOx)};
+      boardDrag={lastAng:Math.atan2(y-boardOy, x-boardOx), raw:boardAngle};
       selected=-1; draw(); e.preventDefault(); return;
     }
     selected=-1; draw(); return;
@@ -539,13 +581,17 @@ function onDown(e){
   const origAnchor=wasPlaced?{q:p.anchor.q,r:p.anchor.r}:null;
   // work out which hexagon of the piece was grabbed + its fixed pivot, so a tap can
   // rotate/flip the piece AROUND that hexagon (keeping it pinned in place)
-  const offs=orientedOffsets(p);
   let clickIdx=0, pivotCell=null, pivotPx=null;
   if(hit.kind==='board'){
     const c=screenToBoardCell(x, y);
-    clickIdx=offs.findIndex(o=>o[0]===c.q-origAnchor.q && o[1]===c.r-origAnchor.r);
+    const bo=boardOffsets(p);   // grid offsets while placed
+    clickIdx=bo.findIndex(o=>o[0]===c.q-origAnchor.q && o[1]===c.r-origAnchor.r);
     pivotCell={q:c.q, r:c.r};
+    // convert the piece's board-space orientation to its current on-screen orientation, so
+    // it lifts off as a plain "hand" piece (placedK 0) that renders unrotated in the tray
+    p.rot=((p.rot-(p.placedK||0)+boardSteps())%6+6)%6; p.placedK=0;
   } else {
+    const offs=orientedOffsets(p);
     const c=pixelToAxial(x-p.tray.x, y-p.tray.y, traySize);
     clickIdx=offs.findIndex(o=>o[0]===c.q && o[1]===c.r);
     const cp=axialToPixel(c.q, c.r, traySize);
@@ -556,21 +602,42 @@ function onDown(e){
   // anchor grab: keep piece under cursor, cell[0] follows pointer
   drag={idx, mx:x, my:y, snapCell:null, valid:false, moved:false, downX:x, downY:y,
         wasPlaced, origAnchor, clickIdx, pivotCell, pivotPx};
+  // press-and-hold (no move) for 2s -> open the rotate/flip action menu on this piece
+  holdTimer=setTimeout(()=>{ holdTimer=null; openMenuFor(idx, x, y); }, 2000);
   updateSnap();
   draw();
   e.preventDefault();
+}
+// build the 3-button (rotate-left / rotate-right / flip) menu beside the held piece
+function openMenuFor(idx, x, y){
+  if(drag && drag.wasPlaced) placeAt(idx, drag.origAnchor.q, drag.origAnchor.r); // restore held board piece
+  drag=null;
+  const R=Math.max(15, Math.min(26, boardSize*0.85)), gap=R*2+8;
+  const side = x < W/2 ? 1 : -1;                 // open toward the roomier side
+  const bx = Math.max(R+2, Math.min(W-R-2, x + side*(R+20)));
+  menu={idx, r:R, buttons:[
+    {action:'rotL', glyph:'⟲', x:bx, y:y-gap},
+    {action:'rotR', glyph:'⟳', x:bx, y:y},
+    {action:'flip', glyph:'⇋', x:bx, y:y+gap},
+  ]};
+  draw();
 }
 function onMove(e){
   if(boardDrag){
     const {x,y}=evtPos(e);
     const ang=Math.atan2(y-boardOy, x-boardOx);
     let d=ang-boardDrag.lastAng; while(d>Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
-    boardAngle+=d; boardDrag.lastAng=ang;
+    boardDrag.raw+=d; boardDrag.lastAng=ang;
+    const STEP=Math.PI/3;                        // 60° clicks (hex symmetry)
+    boardAngle=Math.round(boardDrag.raw/STEP)*STEP;
     draw(); e.preventDefault(); return;
   }
   if(!drag) return;
   const {x,y}=evtPos(e);
-  if(Math.hypot(x-drag.downX,y-drag.downY)>8) drag.moved=true;
+  if(Math.hypot(x-drag.downX,y-drag.downY)>8){
+    drag.moved=true;
+    if(holdTimer){ clearTimeout(holdTimer); holdTimer=null; }   // a real drag, not a hold
+  }
   drag.mx=x; drag.my=y;
   updateSnap();
   draw();
@@ -591,31 +658,22 @@ function updateSnap(){
   }
 }
 function onUp(e){
+  if(holdTimer){ clearTimeout(holdTimer); holdTimer=null; }   // released before the hold fired
   if(boardDrag){ boardDrag=null; draw(); e && e.preventDefault(); return; }
   if(!drag) return;
   const idx=drag.idx, p=pieces[idx];
   if(!drag.moved){
-    const now=Date.now();
-    if(lastTap && now-lastTap.t<320 && lastTap.idx===idx){
-      // second tap of a double-click(-tap) on the same piece -> flip it
-      // (undo the +1 the first tap applied, so a double is a pure flip, no net rotation)
-      p.rot=(p.rot+5)%6;
-      p.flip=!p.flip;
-      lastTap=null;
-    } else {
-      // single tap rotates the piece in place
-      p.rot=(p.rot+1)%6;
-      lastTap={t:now, idx};
-    }
-    // pivot around the grabbed hexagon: keep that cell pinned where it was
-    const co=orientedOffsets(p)[drag.clickIdx];
+    // a single tap rotates the piece in place, pivoting around the grabbed hexagon
+    p.rot=(p.rot+1)%6;
     if(drag.wasPlaced){
+      const co=gridOffsets(p)[drag.clickIdx];               // clicked hex, grid space
       // re-place so the clicked board cell is unchanged; if the rest runs off-board, free-drop near cursor
       if(!placeAt(idx, drag.pivotCell.q-co[0], drag.pivotCell.r-co[1])){
-        const cp=axialToPixel(co[0],co[1],traySize);
-        p.tray.x=drag.mx-cp.x; p.tray.y=drag.my-cp.y;
+        const so=orientedOffsets(p)[drag.clickIdx];
+        p.tray.x=drag.mx-axialToPixel(so[0],so[1],traySize).x; p.tray.y=drag.my-axialToPixel(so[0],so[1],traySize).y;
       }
     } else {
+      const co=orientedOffsets(p)[drag.clickIdx];            // clicked hex, screen space
       const cp=axialToPixel(co[0],co[1],traySize);
       p.tray.x=drag.pivotPx.x-cp.x; p.tray.y=drag.pivotPx.y-cp.y;
     }
@@ -634,21 +692,24 @@ function onUp(e){
   e && e.preventDefault();
 }
 
-/* rotate the active piece (dragging or selected) */
+/* rotate/flip a piece (by index). Placed pieces keep their board spot; the board-space
+   orientation is converted to screen space first so the change is applied as the player sees it. */
 function activeIdx(){ return drag? drag.idx : selected; }
-function rotateActive(dir){
-  const i=activeIdx(); if(i<0) return;
+function reorient(i, deltaRot, doFlip){
+  if(i<0) return;
   const p=pieces[i];
   const wasPlaced=p.placed;
   const anchor=wasPlaced?{q:p.anchor.q, r:p.anchor.r}:null;
-  if(wasPlaced) removeFromBoard(i);
-  p.rot=((p.rot + (dir>0?1:5))%6);
-  // keep it on the board at the same spot if it still fits, else drop to tray
-  if(wasPlaced) placeAt(i, anchor.q, anchor.r);
-  if(drag) updateSnap();
+  if(wasPlaced){ p.rot=((p.rot-(p.placedK||0)+boardSteps())%6+6)%6; p.placedK=0; removeFromBoard(i); }
+  if(deltaRot) p.rot=((p.rot+deltaRot)%6+6)%6;
+  if(doFlip) p.flip=!p.flip;
+  if(wasPlaced) placeAt(i, anchor.q, anchor.r);   // back to the same spot if it still fits
+  if(drag && drag.idx===i) updateSnap();
   updateCount();
   draw();
 }
+function rotateActive(dir){ reorient(activeIdx(), dir>0?1:5, false); }
+function flipActive(){ reorient(activeIdx(), 0, true); }
 
 /* ---------- buttons & win ---------- */
 function updateCount(){
@@ -669,7 +730,7 @@ function cyrb53(str, seed){        // fast 53-bit string hash
 function solutionKey(){ // stable string: which piece fills each board cell (one per cell when solved)
   return boardCells.map(([q,r])=>{ const a=cover.get(q+","+r); return a&&a.length? pieces[a[0]].id : '_'; }).join('|');
 }
-function currentLayout(){ return pieces.map(p=>({color:p.color, cells:placedCells(p)})); }
+function currentLayout(){ return pieces.map(p=>({id:p.id, color:p.color, cells:placedCells(p)})); }
 function loadCollection(){ try{ return JSON.parse(localStorage.getItem('hexSolvedV1')||'{}'); }catch(e){ return {}; } }
 function saveCollection(c){ try{ localStorage.setItem('hexSolvedV1', JSON.stringify(c)); }catch(e){} }
 function updateSolCount(){ document.getElementById('solCount').textContent=Object.keys(loadCollection()).length; }
@@ -770,11 +831,12 @@ async function openCollection(){
 function newGame(shuffleOnly){
   document.getElementById('win').style.display='none';
   solvedFlag=false; startTime=null; selected=-1; drag=null; boardDrag=null; boardAngle=0;
+  menu=null; if(holdTimer){ clearTimeout(holdTimer); holdTimer=null; }
   if(!shuffleOnly) makePieces();
   else for(const p of pieces){ p.placed=false; p.anchor=null; }
   for(const p of pieces){
     p.rot=Math.floor(Math.random()*6);
-    p.flip=false;
+    p.flip=false; p.placedK=0;
   }
   recompute();
   layoutTray();
@@ -782,9 +844,10 @@ function newGame(shuffleOnly){
 }
 function solveAll(){
   document.getElementById('win').style.display='none';
+  boardDrag=null; boardAngle=0;      // show the solution in the un-rotated frame
   for(const p of pieces){
-    p.rot=0; p.flip=false;
-    // solution cells are absolute; with rot0/flip false, orientedOffsets == base - base[0]
+    p.rot=0; p.flip=false; p.placedK=0;
+    // solution cells are absolute; with rot0/flip false, boardOffsets == base - base[0]
     p.anchor={q:p.base[0][0], r:p.base[0][1]}; p.placed=true;
   }
   recompute();
@@ -795,23 +858,30 @@ function solveAll(){
 
 document.getElementById('rotL').onclick=()=>rotateActive(-1);
 document.getElementById('rotR').onclick=()=>rotateActive(1);
+document.getElementById('flip').onclick=()=>flipActive();
 document.getElementById('shuffle').onclick=()=>newGame(true);
 document.getElementById('reset').onclick=()=>newGame(true);
-document.getElementById('solve').onclick=solveAll;
 document.getElementById('again').onclick=()=>newGame(true);
 document.getElementById('solutions').onclick=openCollection;
 document.getElementById('viewAll').onclick=openCollection;
 document.getElementById('colClose').onclick=()=>document.getElementById('collection').style.display='none';
-document.getElementById('submitName').onclick=()=>{
+document.getElementById('submitName').onclick=async ()=>{
   if(!pendingSubmit) return;
   const input=document.getElementById('nameInput');
   const msg=document.getElementById('nameMsg');
+  const btn=document.getElementById('submitName');
   const name=input.value.trim();
   if(name.length<2){ msg.textContent='Please enter a name (at least 2 characters).'; msg.className=''; return; }
-  submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
-  msg.textContent='Opening GitHub to submit “'+name+'” for approval…';
-  msg.className='ok';
-  document.getElementById('submitName').disabled=true;
+  btn.disabled=true; msg.className=''; msg.textContent='Submitting “'+name+'” for approval…';
+  try{
+    await submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
+    msg.className='ok';
+    msg.textContent='✓ Submitted! “'+name+'” is pending approval.';
+    input.disabled=true;
+  }catch(err){
+    btn.disabled=false; msg.className='';
+    msg.textContent='Couldn’t submit: '+(err.message||'please try again later')+'.';
+  }
 };
 document.getElementById('nameInput').addEventListener('keydown',e=>{
   if(e.key==='Enter'){ e.preventDefault(); document.getElementById('submitName').click(); }
@@ -820,6 +890,7 @@ document.getElementById('nameInput').addEventListener('keydown',e=>{
 window.addEventListener('keydown',e=>{
   if(e.key==='r'||e.key==='R'||e.key==='ArrowRight') { rotateActive(1); }
   else if(e.key==='e'||e.key==='E'||e.key==='ArrowLeft'){ rotateActive(-1); }
+  else if(e.key==='f'||e.key==='F'){ flipActive(); }
 });
 canvas.addEventListener('mousedown',onDown);
 window.addEventListener('mousemove',onMove);
