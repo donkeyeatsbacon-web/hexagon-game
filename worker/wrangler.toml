@@ -1,0 +1,24 @@
+name = "hexagon-name-submit"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Public config (safe to commit). The token is NOT here — it's a secret (see README).
+[vars]
+GH_OWNER = "donkeyeatsbacon-web"
+GH_REPO = "hexagon-game"
+SUBMISSION_LABEL = "name-submission"
+# Comma-separated browser origins allowed to POST. Add your GitHub Pages URL.
+# For a project page it's usually https://<user>.github.io  (origin has no path).
+ALLOWED_ORIGINS = "https://donkeyeatsbacon-web.github.io"
+# Must match TOTAL_SOLUTIONS in index.html (only affects the #num shown).
+TOTAL_SOLUTIONS = "817984"
+
+# Hard per-IP rate limit (Cloudflare Rate Limiting binding).
+# limit = max requests per window; period must be 10 or 60 (seconds).
+# namespace_id is any integer unique to this limiter in your account.
+# To disable, delete this block (the Worker skips limiting when the binding is absent).
+[[unsafe.bindings]]
+name = "RL"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 6, period = 60 }
