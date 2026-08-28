@@ -9,7 +9,10 @@ GH_REPO = "hexagon-game"
 SUBMISSION_LABEL = "name-submission"
 # Comma-separated browser origins allowed to POST. Add your GitHub Pages URL.
 # For a project page it's usually https://<user>.github.io  (origin has no path).
-ALLOWED_ORIGINS = "https://donkeyeatsbacon-web.github.io"
+# The localhost entries are the packaged-app origins: Capacitor serves the bundle from
+# capacitor://localhost on iOS and https://localhost on Android. Without them every
+# in-app submission is blocked by CORS.
+ALLOWED_ORIGINS = "https://donkeyeatsbacon-web.github.io,capacitor://localhost,ionic://localhost,https://localhost,http://localhost"
 # Must match TOTAL_SOLUTIONS in index.html (only affects the #num shown).
 TOTAL_SOLUTIONS = "817984"
 

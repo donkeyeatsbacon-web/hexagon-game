@@ -9,6 +9,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Wrangler local state
+.wrangler/
+
 # Personal reference photos (kept local, not published)
 PXL_*.jpg
 
