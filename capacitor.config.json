@@ -1,0 +1,29 @@
+{
+  "appId": "com.donkeyeatsbacon.hexagonpuzzle",
+  "appName": "Hexagon",
+  "webDir": "www",
+  "backgroundColor": "#1b1d24",
+  "android": {
+    "backgroundColor": "#1b1d24",
+    "allowMixedContent": false
+  },
+  "ios": {
+    "backgroundColor": "#1b1d24",
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 500,
+      "backgroundColor": "#1b1d24",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#242730",
+      "overlaysWebView": false
+    }
+  }
+}
