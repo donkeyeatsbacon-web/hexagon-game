@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hexagon</string>
+    <string name="title_activity_main">Hexagon</string>
+    <string name="package_name">com.donkeyeatsbacon.hexagonpuzzle</string>
+    <string name="custom_url_scheme">com.donkeyeatsbacon.hexagonpuzzle</string>
+</resources>
