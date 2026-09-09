@@ -7,6 +7,8 @@
   "scripts": {
     "build": "node scripts/build-www.mjs",
     "assets": "node scripts/make-assets.mjs",
+    "screenshots": "node scripts/make-screenshots.mjs",
+    "check-listing": "node scripts/check-listing.mjs",
     "sync": "npm run build && cap sync",
     "android": "npm run sync && cap open android",
     "ios": "npm run sync && cap open ios"

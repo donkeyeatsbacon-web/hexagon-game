@@ -125,7 +125,25 @@ const out = (name, svg) => {
   console.log('wrote resources/' + name);
 };
 
+// Play Store feature graphic: fixed 1024x500, board offset left with room for wordmark.
+function featureGraphic() {
+  const W = 1024, H = 500;
+  const inner = render(H, 0.78, { background: false })
+    .replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    `<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">` +
+    `<stop offset="0%" stop-color="#22252e"/><stop offset="100%" stop-color="#15171d"/>` +
+    `</linearGradient></defs>` +
+    `<rect width="${W}" height="${H}" fill="url(#bg)"/>` +
+    `<g transform="translate(60,0)">${inner}</g>` +
+    `<text x="620" y="228" font-family="Helvetica,Arial,sans-serif" font-size="76" font-weight="700" fill="#eef1f6">Hexagon</text>` +
+    `<text x="622" y="286" font-family="Helvetica,Arial,sans-serif" font-size="29" fill="#9aa3b2">Fit every piece.</text>` +
+    `<text x="622" y="328" font-family="Helvetica,Arial,sans-serif" font-size="29" fill="#f0a020">817,984 ways to win.</text>` +
+    `</svg>`;
+}
+
 out('icon.svg', render(1024, 0.72));
+out('feature-graphic.svg', featureGraphic());
 // Android adaptive icons crop to a circle, so the art must sit inside a safe centre zone.
 out('icon-foreground.svg', render(1024, 0.46));
 out('icon-background.svg', `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="${BG}"/></svg>`);

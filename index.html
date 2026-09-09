@@ -113,6 +113,8 @@
   #tut li b{color:var(--ink);display:block;font-size:13.5px;}
   #tut li span.tx{color:var(--muted);font-size:12.5px;line-height:1.4;}
   #tut .btn{width:100%;padding:11px;font-size:14px;}
+  #tut .legal{margin:12px 0 0;text-align:center;font-size:11.5px;}
+  #tut .legal a{color:var(--muted);}
   /* Phones: the toolbar was wrapping to six rows and eating ~16% of the screen. Drop what
      touch already covers — rotate/flip are reachable by tapping a piece and by the
      press-and-hold menu (both taught in the tutorial) — and shorten the rest. */
@@ -200,6 +202,9 @@
           <span class="tx">Two pieces overlap there — move one of them away.</span></div></li>
       </ul>
       <button class="btn primary" id="tutClose">Got it</button>
+      <!-- target=_blank so the packaged app hands this to the system browser instead of
+           navigating the WebView off the game with no way back -->
+      <p class="legal"><a id="privacyLink" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
     </div></div>
   </div>
 </div>
@@ -223,6 +228,9 @@ const SITE_BASE='https://donkeyeatsbacon-web.github.io/hexagon-game/';
 // localhost dev server as packaged, so local testing still reads the local file.
 const IS_PACKAGED = !!(window.Capacitor || window.cordova) || !/^https?:$/.test(location.protocol);
 const NAMES_URL = (IS_PACKAGED ? SITE_BASE : '') + 'approved-names.json';
+// Same reasoning for the privacy policy: privacy.html is not bundled into the app, so inside
+// a native shell the link has to be absolute or it resolves to a file that isn't there.
+document.getElementById('privacyLink').href = (IS_PACKAGED ? SITE_BASE : '') + 'privacy.html';
 let approvedNames = {};                 // { solutionId: {name, num, approvedAt} }
 async function loadApprovedNames(){
   try{

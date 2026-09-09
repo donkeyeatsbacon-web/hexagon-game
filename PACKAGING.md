@@ -59,25 +59,52 @@ cd .. && npx capacitor-assets generate           # fans out to every platform si
 `icon-foreground` is drawn smaller than `icon` on purpose: Android adaptive icons crop to a
 circle, so the art has to sit inside the safe centre zone.
 
+## Store listing
+
+All copy — descriptions, keywords, review notes, privacy-label answers and content-rating
+guidance — lives in [STORE-LISTING.md](STORE-LISTING.md). Verify nothing exceeds a store's
+character limit (they reject rather than truncate):
+
+```bash
+npm run check-listing
+```
+
+Screenshots are generated at exact store pixel sizes. Needs Playwright and a static server
+on port 8777:
+
+```bash
+npm install -D playwright && npx playwright install chromium
+npm run build && npx http-server www -p 8777    # any static server works
+npm run screenshots                             # -> store-assets/screenshots/
+```
+
+Real captures from a physical device are also fine, and arguably better — the generated ones
+exist so you are never blocked on owning the right hardware.
+
 ## Before you submit
 
-- [ ] **Confirm `SITE_BASE`** in `index.html`. It is currently
-      `https://donkeyeatsbacon-web.github.io/hexagon-game/`. In a packaged app this is where
-      approved solution names are fetched from; if it is wrong, names fail silently.
-- [ ] **Deploy the Worker CORS change.** `worker/wrangler.toml` now allows the packaged-app
-      origins (`capacitor://localhost`, `https://localhost`). Until it is redeployed, in-app
-      name submissions are blocked by CORS. Run `npx wrangler deploy` in `worker/`.
-- [ ] **Privacy policy URL** — required by both stores. The app transmits a player-chosen
-      name plus the originating IP to a Cloudflare Worker, which opens a GitHub issue.
-- [ ] **Apple privacy labels / Google Data Safety** must match the above.
-- [ ] **Apple guideline 1.2 (user-generated content).** Names are owner-approved before
-      anyone else can see them. Say so explicitly in the review notes — it is a
-      pre-publication moderation gate, which is what the guideline asks for.
-- [ ] Content rating questionnaires (IARC for Google, age rating for Apple).
-- [ ] Screenshots per device class; Play also wants a feature graphic.
+- [x] **`SITE_BASE` confirmed** — `https://donkeyeatsbacon-web.github.io/hexagon-game/`
+      returns 200 and serves the current build.
+- [x] **Worker CORS deployed.** Verified: the Worker echoes `capacitor://localhost` and
+      `https://localhost` back as allowed origins, and refuses unlisted ones.
+- [x] **Privacy policy** written and published at
+      `https://donkeyeatsbacon-web.github.io/hexagon-game/privacy.html`, linked from inside
+      the app (How to play → Privacy policy).
+- [x] **Apple privacy labels / Google Data Safety** — answers prepared in STORE-LISTING.md.
+- [x] **Apple guideline 1.2 (user-generated content)** — review-notes text prepared. Names
+      are approved before publication, which is the pre-publication gate the guideline asks
+      for; saying so up front heads off the most likely rejection.
+- [x] **Feature graphic** (Play, 1024×500) — `resources/feature-graphic.png`.
+- [ ] Content rating questionnaires. Answer **yes** to "can users interact or share content"
+      and note that submissions are moderated — see STORE-LISTING.md.
+- [ ] Screenshots — run `npm run screenshots`, or capture on a device.
+- [ ] **Release signing.** The APK built so far is debug-signed. Generate a release keystore,
+      keep it somewhere safe and backed up (losing it means you can never update the app),
+      and build an AAB rather than an APK for Play.
 - [ ] Google Play personal developer accounts require a closed test with 12 testers for 14
       continuous days before production access. Verify the current policy — it is calendar
-      time, so start it early.
+      time, not work time, so start it as early as possible.
+- [ ] iOS requires macOS and Xcode. Nothing on a Linux machine produces an iOS build.
 
 ## Notes
 
