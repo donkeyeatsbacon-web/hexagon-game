@@ -38,7 +38,10 @@
      The size MUST be given explicitly: <canvas> is a replaced element, so with width:auto
      it would fall back to its intrinsic size and ignore `right` — and since resize() sets
      canvas.width from clientWidth, that intrinsic size feeds back and the box collapses. */
-  canvas{position:absolute;top:0;left:env(safe-area-inset-left,0px);display:block;touch-action:none;
+  /* Scoped to #c, NOT a bare `canvas` selector: the solution gallery renders its own small
+     canvases, and a global position:absolute yanked every one of them out of its tile and
+     stacked them in the corner of the modal. */
+  #c{position:absolute;top:0;left:env(safe-area-inset-left,0px);display:block;touch-action:none;
     width:calc(100% - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px));
     height:calc(100% - env(safe-area-inset-bottom,0px));}
   .hint{position:absolute;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);
@@ -1102,7 +1105,10 @@ function drawSolMini(canvas, layout){
   }));
   const w=Math.ceil(maxx-minx)+pad*2, hh=Math.ceil(maxy-miny)+pad*2;
   const DPR=Math.min(window.devicePixelRatio||1,2);
-  canvas.width=w*DPR; canvas.height=hh*DPR; canvas.style.width=w+'px'; canvas.style.height=hh+'px';
+  // Only the backing store is sized here — no inline CSS width/height. `.sol canvas` then
+  // scales the mini to its tile (width:100%, height:auto), so it stays inside narrow grid
+  // columns instead of overflowing at a fixed pixel size.
+  canvas.width=w*DPR; canvas.height=hh*DPR;
   const c=canvas.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0);
   cells.forEach(cell=>{
     c.beginPath();

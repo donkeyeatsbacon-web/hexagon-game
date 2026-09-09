@@ -11,10 +11,14 @@
  * 1290x2796 with no resampling. Upscaling a 430px capture would look soft.
  */
 import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const URL_BASE = process.env.SHOT_URL || 'http://localhost:8777/index.html';
-const OUT = new URL('../store-assets/screenshots/', import.meta.url);
+// Playwright's screenshot `path` must be a string — a URL object throws inside its
+// mime-type sniffing with a confusing "lastIndexOf is not a function".
+const OUT = fileURLToPath(new URL('../store-assets/screenshots/', import.meta.url));
 
 // css width/height x scale = the exact pixel size each store asks for
 const DEVICES = [
@@ -76,12 +80,39 @@ for (const d of DEVICES) {
       isMobile: d.scale === 3,
       hasTouch: true,
     });
+    // Seed the tutorial-seen flag BEFORE any page script runs. A fresh context has empty
+    // storage, so the game would otherwise open the first-run tutorial over every scene.
+    // The tutorial scene re-opens it deliberately.
+    await ctx.addInitScript(() => { try { localStorage.setItem('hexTutorialV1', '1'); } catch (e) {} });
     const page = await ctx.newPage();
     await page.goto(URL_BASE, { waitUntil: 'load' });
-    await page.waitForFunction(() => typeof window.pieces !== 'undefined' && window.pieces.length > 0);
+    // NOT `window.pieces` — the game declares its state with top-level `let`, which creates a
+    // global *lexical* binding rather than a property on window. Unqualified access resolves
+    // through the scope chain; window.pieces would be undefined forever.
+    await page.waitForFunction(() => typeof pieces !== 'undefined' && pieces.length > 0);
     await page.evaluate(scene);
     await page.waitForTimeout(350);           // let the overlap flash / layout settle
-    const file = new URL(`${d.id}-${name}.png`, OUT);
+
+    // Assert the scene is actually what it claims. Checking game state alone is not enough:
+    // an overlay left open covers the board and the capture silently shows the wrong thing.
+    const shown = await page.evaluate(() => ({
+      tut: getComputedStyle(document.getElementById('tut')).display !== 'none',
+      win: getComputedStyle(document.getElementById('win')).display !== 'none',
+      col: getComputedStyle(document.getElementById('collection')).display !== 'none',
+    }));
+    const want = {
+      board:      { tut: false, win: false, col: false },
+      solved:     { tut: false, win: true,  col: false },
+      collection: { tut: false, win: false, col: true },
+      tutorial:   { tut: true,  win: false, col: false },
+    }[name];
+    for (const k of Object.keys(want)) {
+      if (shown[k] !== want[k]) {
+        throw new Error(`${d.id}/${name}: expected ${k}=${want[k]} but got ${shown[k]}`);
+      }
+    }
+
+    const file = join(OUT, `${d.id}-${name}.png`);
     await page.screenshot({ path: file, scale: 'device' });
     const box = await page.evaluate(() => [innerWidth, innerHeight]);
     console.log(`${d.id.padEnd(12)} ${name.padEnd(11)} ${box[0]}x${box[1]} css -> ${d.note}`);
