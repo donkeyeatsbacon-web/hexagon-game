@@ -109,6 +109,8 @@ exist so you are never blocked on owning the right hardware.
 Play needs a signed AAB; the debug APK will not be accepted. One-time setup:
 
 ```bash
+openssl rand -base64 24        # use this as the password at both prompts
+
 keytool -genkeypair -v -keystore ~/hexagon-release.jks \
   -keyalg RSA -keysize 2048 -validity 10000 -alias hexagon
 
@@ -116,9 +118,18 @@ cp android/keystore.properties.example android/keystore.properties
 # then fill in storeFile / storePassword / keyAlias / keyPassword
 ```
 
-> **Back the .jks file up somewhere off this machine, before you ship anything.**
-> If you lose it you can never publish an update to this app. Play would require a new
-> package name and a new listing, and existing users could not be migrated.
+Press RETURN at keytool's "key password" prompt so it matches the store password — separate
+passwords buy nothing here. Don't pass `-storepass` on the command line; it lands in your
+shell history.
+
+> **Back the .jks file up off this machine, together with its password.** One without the
+> other is useless; keep both in a password manager.
+>
+> This is an **upload key**, not the app signing key. New apps are enrolled in Play App
+> Signing, where Google holds the real signing key — so losing this one means requesting an
+> upload key reset through Play Console support. Slow and irritating, but recoverable. It is
+> only genuinely unrecoverable if you opt out of Play App Signing and manage the signing key
+> yourself, which is a good reason not to opt out.
 >
 > `keystore.properties`, `*.jks` and `*.keystore` are all gitignored. Capacitor's own
 > `android/.gitignore` leaves the keystore lines commented out, so the root `.gitignore`
