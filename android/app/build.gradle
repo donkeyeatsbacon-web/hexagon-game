@@ -1,5 +1,22 @@
 apply plugin: 'com.android.application'
 
+// Release signing credentials live in android/keystore.properties, which is NOT committed --
+// it holds passwords and the path to the upload keystore. See PACKAGING.md.
+//
+// Everything here is conditional on that file existing so a fresh clone, or CI without the
+// secrets, still syncs and builds debug normally instead of failing outright.
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def hasSigningConfig = keystorePropsFile.exists() && keystoreProps['storeFile'] != null
+
+// Play rejects an upload whose versionCode it has seen before, so every upload needs a fresh
+// one. Override without editing this file:  ./gradlew bundleRelease -PversionCode=2 -PversionName=1.1
+def appVersionCode = (project.findProperty('versionCode') ?: '1') as Integer
+def appVersionName = project.findProperty('versionName') ?: '1.0'
+
 android {
     namespace "com.donkeyeatsbacon.hexagonpuzzle"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +24,8 @@ android {
         applicationId "com.donkeyeatsbacon.hexagonpuzzle"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +33,38 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasSigningConfig) {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            // Left off deliberately: R8 can strip the reflection-based methods Capacitor's
+            // JS-to-native bridge relies on, and the app is small enough that shrinking buys
+            // little. Turn it on only alongside real on-device testing of the plugins.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasSigningConfig) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+// Fail loudly rather than silently emitting an unsigned artifact that Play will reject.
+tasks.configureEach { task ->
+    if (task.name in ['bundleRelease', 'assembleRelease'] && !hasSigningConfig) {
+        task.doFirst {
+            throw new GradleException(
+                "No signing config found.\n" +
+                "Create android/keystore.properties from keystore.properties.example and\n" +
+                "point storeFile at your upload keystore. See PACKAGING.md.")
         }
     }
 }

@@ -19,8 +19,12 @@ www/
 # rasterised from the .svg sources by scripts/make-assets.mjs
 resources/*.png
 .gradle/
+# Signing secrets. Capacitor's own android/.gitignore leaves the keystore lines commented
+# out, so these root-level patterns are the thing actually preventing a key or its passwords
+# from being committed. Do not remove them when setting up signing.
 *.keystore
 *.jks
+keystore.properties
 
 # android/ is committed, per Capacitor's recommendation — it carries the native config and is
 # where signing settings land. It has its own .gitignore covering build output, .gradle/,

@@ -98,13 +98,53 @@ exist so you are never blocked on owning the right hardware.
 - [ ] Content rating questionnaires. Answer **yes** to "can users interact or share content"
       and note that submissions are moderated — see STORE-LISTING.md.
 - [ ] Screenshots — run `npm run screenshots`, or capture on a device.
-- [ ] **Release signing.** The APK built so far is debug-signed. Generate a release keystore,
-      keep it somewhere safe and backed up (losing it means you can never update the app),
-      and build an AAB rather than an APK for Play.
+- [ ] **Release signing** — configured, but needs your keystore. See below.
 - [ ] Google Play personal developer accounts require a closed test with 12 testers for 14
       continuous days before production access. Verify the current policy — it is calendar
       time, not work time, so start it as early as possible.
 - [ ] iOS requires macOS and Xcode. Nothing on a Linux machine produces an iOS build.
+
+## Release build (Play)
+
+Play needs a signed AAB; the debug APK will not be accepted. One-time setup:
+
+```bash
+keytool -genkeypair -v -keystore ~/hexagon-release.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias hexagon
+
+cp android/keystore.properties.example android/keystore.properties
+# then fill in storeFile / storePassword / keyAlias / keyPassword
+```
+
+> **Back the .jks file up somewhere off this machine, before you ship anything.**
+> If you lose it you can never publish an update to this app. Play would require a new
+> package name and a new listing, and existing users could not be migrated.
+>
+> `keystore.properties`, `*.jks` and `*.keystore` are all gitignored. Capacitor's own
+> `android/.gitignore` leaves the keystore lines commented out, so the root `.gitignore`
+> is what actually prevents a key or its passwords being committed — don't remove those.
+
+Then build. Play rejects a versionCode it has already seen, so bump it every upload:
+
+```bash
+npm run sync
+cd android
+./gradlew bundleRelease -PversionCode=2 -PversionName=1.1
+# -> app/build/outputs/bundle/release/app-release.aab
+```
+
+Without `keystore.properties` the release tasks fail immediately with an explanatory
+message, rather than quietly producing an unsigned artifact that Play would reject.
+
+Verify before uploading:
+
+```bash
+$ANDROID_HOME/build-tools/35.0.0/apksigner verify --print-certs \
+  app/build/outputs/apk/release/app-release.apk
+```
+
+`minifyEnabled` is deliberately off: R8 can strip the reflection-based methods Capacitor's
+JS-to-native bridge depends on. Turn it on only alongside real on-device plugin testing.
 
 ## Notes
 
