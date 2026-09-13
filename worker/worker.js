@@ -11,7 +11,7 @@
  *   GH_OWNER, GH_REPO  the target repo
  *   SUBMISSION_LABEL   label applied to the issue (default: name-submission)
  *   ALLOWED_ORIGINS    comma-separated list of allowed browser origins (your GitHub Pages URL)
- *   TOTAL_SOLUTIONS    must match the game's TOTAL_SOLUTIONS constant (for the #num shown)
+ *   (the solution code shown in issue titles is derived from the id; no total is involved)
  *   RL                 (binding) Cloudflare Rate Limiting — hard per-IP cap (optional)
  */
 
@@ -78,12 +78,12 @@ export default {
     } catch { /* lookup failed → fail open and create the submission below */ }
 
     // 4) Create the GitHub issue server-side (token stays secret)
-    const submission = { id: v.id, num: v.num, name, layout: data.layout };
-    const title = `Name #${v.num}: ${name}`;
+    const submission = { id: v.id, code: v.code, name, layout: data.layout };
+    const title = `Name ${v.code}: ${name}`;
     const body =
       'A player proposed a name for a hexagon solution — approve it in the admin page.\n\n' +
       `**Name:** ${name}\n` +
-      `**Solution:** #${v.num} (\`${v.id}\`)\n\n` +
+      `**Solution:** ${v.code} (\`${v.id}\`)\n\n` +
       '```json\n' + JSON.stringify(submission) + '\n```\n';
 
     let gh;
@@ -133,6 +133,12 @@ function cyrb53(str, seed = 0) {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
+// Must match solutionCode() in index.html so an issue title matches what the player saw.
+function solutionCode(id) {
+  const s = String(id).toUpperCase().padStart(11, '0');
+  return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
+}
+
 function boardCells() {
   const cells = [];
   for (let q = -BOARD_RADIUS; q <= BOARD_RADIUS; q++)
@@ -143,7 +149,6 @@ function boardCells() {
 
 // Verify layout is a complete, non-overlapping, on-board tiling and its signature matches `id`.
 function validateSolution(data, env) {
-  const TOTAL = Number(env.TOTAL_SOLUTIONS) || 817984;   // must match the game
   const layout = data.layout;
   if (!Array.isArray(layout) || layout.length < 1) return { ok: false, error: 'Missing layout.' };
 
@@ -166,7 +171,7 @@ function validateSolution(data, env) {
   const key = cells.map(([q, r]) => occ.get(q + ',' + r)).join('|');
   const h = cyrb53(key);
   const id = h.toString(36);
-  const num = (h % TOTAL) + 1;
+  const code = solutionCode(id);
   if (typeof data.id === 'string' && data.id !== id) return { ok: false, error: 'Solution signature mismatch.' };
-  return { ok: true, id, num };
+  return { ok: true, id, code };
 }

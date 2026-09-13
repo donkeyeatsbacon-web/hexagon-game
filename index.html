@@ -63,7 +63,10 @@
   .badge{background:linear-gradient(135deg,#2c3140,#20232c);border:1px solid var(--line);
     border-radius:14px;padding:14px 20px;margin:4px 0 16px;display:inline-block;min-width:240px;}
   .badge .lab{font-size:12px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;}
-  .badge .num{font-size:30px;font-weight:800;color:var(--accent);line-height:1.1;margin:2px 0;}
+  /* a 13-character code, not a short number — monospace keeps the groups aligned and stops
+     it looking like a quantity */
+  .badge .num{font-size:21px;font-weight:800;color:var(--accent);line-height:1.15;margin:4px 0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.5px;}
   .badge .num small{font-size:15px;color:var(--muted);font-weight:600;}
   .badge .tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;}
   .badge .tag.new{background:#1e3a2a;color:var(--good);}
@@ -95,7 +98,8 @@
             calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));}
   .sol{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center;}
   .sol canvas{width:100%;height:auto;display:block;border-radius:6px;}
-  .sol .sn{font-weight:800;color:var(--accent);font-size:15px;margin-top:6px;}
+  .sol .sn{font-weight:800;color:var(--accent);font-size:11.5px;margin-top:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.3px;}
   .sol .sd{color:var(--muted);font-size:11px;}
   #gallery .empty{color:var(--muted);grid-column:1/-1;text-align:center;padding:40px;}
   /* first-run tutorial — the .hint bar is hidden on phones, so this is the only place
@@ -234,7 +238,7 @@ const NAMES_URL = (IS_PACKAGED ? SITE_BASE : '') + 'approved-names.json';
 // Same reasoning for the privacy policy: privacy.html is not bundled into the app, so inside
 // a native shell the link has to be absolute or it resolves to a file that isn't there.
 document.getElementById('privacyLink').href = (IS_PACKAGED ? SITE_BASE : '') + 'privacy.html';
-let approvedNames = {};                 // { solutionId: {name, num, approvedAt} }
+let approvedNames = {};                 // { solutionId: {name, approvedAt} }
 async function loadApprovedNames(){
   try{
     const r = await fetch(NAMES_URL+'?_='+Date.now(), {cache:'no-store'});
@@ -242,12 +246,12 @@ async function loadApprovedNames(){
   }catch(e){ /* offline / not published yet — names just won't show */ }
 }
 // POST the submission to the Worker (no GitHub login needed). Resolves on success, throws on error.
-async function submitNameForApproval(id, num, name, layout){
+async function submitNameForApproval(id, code, name, layout){
   const hp=document.getElementById('hpWebsite');
   const res = await fetch(WORKER_URL, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ id, num, name, layout, website: hp?hp.value:'' })
+    body: JSON.stringify({ id, code, name, layout, website: hp?hp.value:'' })
   });
   let body={}; try{ body=await res.json(); }catch(e){}
   if(!res.ok || body.error) throw new Error(body.error || ('HTTP '+res.status));
@@ -1006,7 +1010,19 @@ function updateCount(){
   document.getElementById('total').textContent=pieces.length;
 }
 /* ---------- solution numbering & collection ---------- */
-const TOTAL_SOLUTIONS = 817984;   // exact count of distinct fillings of this piece set
+/* A solution is identified by a code derived from the whole 53-bit hash of its filling,
+   not by a position in any list.
+   There used to be a "#N of 817,984" here, which was wrong twice over. 817,984 is not the
+   number of fillings -- an exhaustive search (scripts/count-solutions.mjs, cross-checked
+   against an independent solver) passes 43 million and is still running. And folding a hash
+   into a fixed range is not a ranking: two different solutions collide onto one number after
+   roughly a thousand finds, while most numbers in the range never appear at all.
+   The code below is a lossless rendering of the id itself, so it is unique exactly as often
+   as the id is, which is to say always. */
+function solutionCode(id){
+  const s=String(id).toUpperCase().padStart(11,'0');
+  return s.slice(0,4)+'-'+s.slice(4,8)+'-'+s.slice(8);
+}
 function cyrb53(str, seed){        // fast 53-bit string hash
   let h1=0xdeadbeef^(seed||0), h2=0x41c6ce57^(seed||0);
   for(let i=0,ch;i<str.length;i++){ ch=str.charCodeAt(i);
@@ -1076,33 +1092,33 @@ function checkWin(){
     clearProgress();   // finished board — don't restore it on next launch
     const secs=startTime?Math.round((Date.now()-startTime)/1000):0;
     const mm=String(Math.floor(secs/60)).padStart(2,'0'), ss=String(secs%60).padStart(2,'0');
-    // assign this exact filling its solution number
+    // identify this exact filling
     const h=cyrb53(solutionKey());
     const id=h.toString(36);
-    const num=(h % TOTAL_SOLUTIONS)+1;
+    const code=solutionCode(id);
     const layout=currentLayout();
     const col=loadCollection();
     const isNew=!(id in col);
     const approved=approvedNames[id];   // {name,...} if this exact solution has an approved name
-    if(isNew){ col[id]={num, date:Date.now(), layout}; }
+    if(isNew){ col[id]={date:Date.now(), layout}; }
     if(approved) col[id] && (col[id].name=approved.name);
     saveCollection(col);
     const found=Object.keys(col).length;
     document.getElementById('badge').innerHTML=
       '<div class="lab">Solution</div>'+
-      '<div class="num">#'+num.toLocaleString()+' <small>of '+TOTAL_SOLUTIONS.toLocaleString()+'</small></div>'+
+      '<div class="num">'+code+'</div>'+
       '<span class="tag '+(isNew?'new':'old')+'">'+(isNew?'★ New find!':'Already collected')+'</span>';
     document.getElementById('wintime').textContent=
-      'Solved in '+mm+':'+ss+' · your collection: '+found+' of '+TOTAL_SOLUTIONS.toLocaleString()+'.';
-    renderNaming(id, num, layout, approved);
+      'Solved in '+mm+':'+ss+' · your collection: '+found+(found===1?' solution.':' solutions.');
+    renderNaming(id, code, layout, approved);
     updateSolCount();
     openOverlay('win');
     sfx.win(); haptic([18,60,18,60,34]);
   }
 }
 
-let pendingSubmit=null;   // {id,num,layout} for the current solved board
-function renderNaming(id, num, layout, approved){
+let pendingSubmit=null;   // {id,code,layout} for the current solved board
+function renderNaming(id, code, layout, approved){
   const nameEl=document.getElementById('approvedName');
   const submitEl=document.getElementById('nameSubmit');
   const msg=document.getElementById('nameMsg');
@@ -1118,7 +1134,7 @@ function renderNaming(id, num, layout, approved){
     submitEl.style.display='';
     document.getElementById('nameInput').value='';
     document.getElementById('submitName').disabled=false;
-    pendingSubmit={id, num, layout};
+    pendingSubmit={id, code, layout};
   }
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>(
@@ -1152,14 +1168,16 @@ async function openCollection(){
   await loadApprovedNames();            // pull the latest approved names before rendering
   const col=loadCollection();
   const entries=Object.entries(col).sort((a,b)=>b[1].date-a[1].date);
-  document.getElementById('colSub').textContent=entries.length+' found · '+TOTAL_SOLUTIONS.toLocaleString()+' total';
+  document.getElementById('colSub').textContent=
+    entries.length+(entries.length===1?' solution collected':' solutions collected');
   const g=document.getElementById('gallery'); g.innerHTML='';
   if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
   entries.forEach(([id,rec])=>{
     const name=(approvedNames[id] && approvedNames[id].name) || rec.name;
     const d=document.createElement('div'); d.className='sol';
     const cv=document.createElement('canvas'); d.appendChild(cv);
-    const sn=document.createElement('div'); sn.className='sn'; sn.textContent='#'+rec.num.toLocaleString(); d.appendChild(sn);
+    // derived from the entry's own id, so collections saved before the change still render
+    const sn=document.createElement('div'); sn.className='sn'; sn.textContent=solutionCode(id); d.appendChild(sn);
     if(name){ const nm=document.createElement('div'); nm.className='sname'; nm.textContent='“'+name+'”'; nm.title=name; d.appendChild(nm); }
     const sd=document.createElement('div'); sd.className='sd'; sd.textContent=new Date(rec.date).toLocaleDateString(); d.appendChild(sd);
     g.appendChild(d); drawSolMini(cv, rec.layout);
@@ -1214,7 +1232,7 @@ document.getElementById('submitName').onclick=async ()=>{
   if(name.length<2){ msg.textContent='Please enter a name (at least 2 characters).'; msg.className=''; return; }
   btn.disabled=true; msg.className=''; msg.textContent='Submitting “'+name+'” for approval…';
   try{
-    const r=await submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
+    const r=await submitNameForApproval(pendingSubmit.id, pendingSubmit.code, name, pendingSubmit.layout);
     msg.className='ok';
     msg.textContent = (r && r.message) ? '✓ '+r.message
       : '✓ Submitted! “'+name+'” is pending approval.';

@@ -13,8 +13,9 @@ SUBMISSION_LABEL = "name-submission"
 # capacitor://localhost on iOS and https://localhost on Android. Without them every
 # in-app submission is blocked by CORS.
 ALLOWED_ORIGINS = "https://donkeyeatsbacon-web.github.io,capacitor://localhost,ionic://localhost,https://localhost,http://localhost"
-# Must match TOTAL_SOLUTIONS in index.html (only affects the #num shown).
-TOTAL_SOLUTIONS = "817984"
+# (TOTAL_SOLUTIONS removed: solutions are identified by a code derived from their id, not by
+# a position in a list, so no total is needed. The old 817,984 was not the number of fillings
+# anyway -- see scripts/count-solutions.mjs.)
 
 # Hard per-IP rate limit (Cloudflare Rate Limiting binding).
 # limit = max requests per window; period must be 10 or 60 (seconds).
