@@ -275,12 +275,20 @@ function rot60(cell){ // 60 deg clockwise: (x,y,z)->(-z,-x,-y)
   const nx=-z, nz=-y; // ny=-x
   return [nx, nz];
 }
-function reflect(cell){ // swap x<->z : (q,r)->(r,q)
-  return [cell[1], cell[0]];
-}
-function transformCells(base, rot, flip){
+// Per-piece flip axis — the mirror each piece flips across, chosen in flip-axis-tool.html.
+// Each is an axial reflection matrix applied as (q,r) -> (a*q+b*r, c*q+d*r).
+const FLIP_MAT = {
+  P0:[[0,-1],[-1,0]], P1:[[0,1],[1,0]],  P2:[[1,1],[0,-1]],  P3:[[-1,-1],[0,1]],
+  P4:[[0,1],[1,0]],   P5:[[-1,0],[1,1]], P6:[[1,1],[0,-1]],  P7:[[0,1],[1,0]],
+  P8:[[0,1],[1,0]],   P9:[[0,1],[1,0]],  P10:[[-1,-1],[0,1]],P11:[[1,0],[-1,-1]],
+  P12:[[-1,-1],[0,1]],P13:[[1,0],[-1,-1]]
+};
+const FLIP_DEFAULT = [[0,1],[1,0]];   // swap q,r (fallback if a piece has no chosen axis)
+function applyMat(m, c){ return [m[0][0]*c[0]+m[0][1]*c[1], m[1][0]*c[0]+m[1][1]*c[1]]; }
+function transformCells(base, rot, flip, mat){
+  const m = mat || FLIP_DEFAULT;
   return base.map(c=>{
-    let cell = flip ? reflect(c) : [c[0], c[1]];
+    let cell = flip ? applyMat(m, c) : [c[0], c[1]];
     for(let i=0;i<rot;i++) cell = rot60(cell);
     return cell;
   });
@@ -312,24 +320,28 @@ let startTime = null, solvedFlag = false;
 function makePieces(){
   pieces = PIECE_DATA.map(p=>({
     id:p.id, color:p.color, base:p.solution.map(c=>[c[0],c[1]]),
-    rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}, placedK:0
+    rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}, placedK:0,
+    flipMat: FLIP_MAT[p.id] || FLIP_DEFAULT
   }));
   cover.clear(); overlapCells.clear(); offBoardCells.clear();
 }
 // board rotation measured in whole 60° steps (the grid is 6-fold symmetric)
 function boardSteps(){ return ((Math.round(boardAngle/(Math.PI/3))%6)+6)%6; }
 // cells of a piece for a given rotation/flip, anchored so cell[0] sits at (0,0)
-function offsetsFor(base, rot, flip){
-  const t = transformCells(base, ((rot%6)+6)%6, flip);
+function offsetsFor(base, rot, flip, mat){
+  const t = transformCells(base, ((rot%6)+6)%6, flip, mat);
   const o = t[0];
   return t.map(c=>[c[0]-o[0], c[1]-o[1]]);
 }
-function orientedOffsets(p){ return offsetsFor(p.base, p.rot, p.flip); }             // hand / screen orientation
+function orientedOffsets(p){ return offsetsFor(p.base, p.rot, p.flip, p.flipMat); }   // hand / screen orientation
 // grid cells a placed piece occupies. `placedK` cancels the board rotation that was in
 // effect when it was dropped, so the piece renders in the exact orientation it was placed
 // (dropping never rotates it) while still turning rigidly when the board itself is turned.
-function boardOffsets(p){ return offsetsFor(p.base, p.rot-(p.placedK||0), p.flip); }
-function gridOffsets(p){ return offsetsFor(p.base, p.rot-boardSteps(), p.flip); }     // grid cells if placed right now
+function boardOffsets(p){ return offsetsFor(p.base, p.rot-(p.placedK||0), p.flip, p.flipMat); }
+function gridOffsets(p){ return offsetsFor(p.base, p.rot-boardSteps(), p.flip, p.flipMat); }  // grid cells if placed right now
+// centroid of a set of axial cells/offsets
+function centroidAx(cells){ let q=0,r=0; for(const c of cells){ q+=c[0]; r+=c[1]; } return {q:q/cells.length, r:r/cells.length}; }
+function meanPx(offs,size){ let x=0,y=0; for(const o of offs){ const p=axialToPixel(o[0],o[1],size); x+=p.x; y+=p.y; } return {x:x/offs.length, y:y/offs.length}; }
 function placedCells(p){
   const offs = boardOffsets(p);
   return offs.map(o=>[p.anchor.q+o[0], p.anchor.r+o[1]]);
@@ -387,8 +399,8 @@ function rescaleTray(prev){
 // max bounding box of a piece over ALL 12 orientations, at hex size 1
 function pieceExtentAll(p){
   let mw=1, mh=1;
-  for(let rot=0;rot<6;rot++){
-    const t=transformCells(p.base,rot,false);
+  for(let f=0;f<2;f++) for(let rot=0;rot<6;rot++){
+    const t=transformCells(p.base,rot,!!f,p.flipMat);
     const o0=t[0]; let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
     for(const c of t){
       const px=axialToPixel(c[0]-o0[0],c[1]-o0[1],1);
@@ -962,11 +974,23 @@ function reorient(i, deltaRot, doFlip){
   const p=pieces[i];
   const wasPlaced=p.placed;
   const anchor=wasPlaced?{q:p.anchor.q, r:p.anchor.r}:null;
+  // a flip mirrors the piece around its own centre, so it stays put instead of jumping
+  const oldCenGrid = (wasPlaced && doFlip) ? centroidAx(placedCells(p)) : null;
+  let oldCenPx = null;
+  if(!wasPlaced && doFlip){ const m=meanPx(orientedOffsets(p),traySize); oldCenPx={x:p.tray.x+m.x, y:p.tray.y+m.y}; }
   if(wasPlaced){ p.rot=((p.rot-(p.placedK||0)+boardSteps())%6+6)%6; p.placedK=0; removeFromBoard(i); }
   if(deltaRot) p.rot=((p.rot+deltaRot)%6+6)%6;
   if(doFlip) p.flip=!p.flip;
   if(deltaRot||doFlip) sfx.rotate();
-  if(wasPlaced) placeAt(i, anchor.q, anchor.r);   // back to the same spot if it still fits
+  if(wasPlaced){
+    let a=anchor;
+    if(oldCenGrid){ const cen=centroidAx(gridOffsets(p));   // keep the flipped centre where it was
+      a={q:Math.round(oldCenGrid.q-cen.q), r:Math.round(oldCenGrid.r-cen.r)}; }
+    if(!placeAt(i, a.q, a.r) && !(a===anchor)) placeAt(i, anchor.q, anchor.r);  // fallback to old spot
+  } else if(oldCenPx){                                       // tray flip: keep centre pixel fixed
+    const m=meanPx(orientedOffsets(p),traySize);
+    p.tray.x=oldCenPx.x-m.x; p.tray.y=oldCenPx.y-m.y;
+  }
   if(drag && drag.idx===i) updateSnap();
   updateCount();
   draw();
