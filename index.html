@@ -299,6 +299,7 @@ for(let q=-BOARD_RADIUS;q<=BOARD_RADIUS;q++)
 let pieces = [];        // {id,color,base,rot,flip,placed,anchor:{q,r}|null,tray:{x,y}}
 let cover = new Map();  // "q,r" -> [piece indices covering this cell] (overlaps allowed)
 let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
+let offBoardCells = new Set(); // placed-piece cells hanging off the board -> flash red
 let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
 let drag = null;        // {idx, mx,my, moved, ...}
 let menu = null;        // {idx, r, buttons:[...]} radial action menu shown after a long-press
@@ -313,7 +314,7 @@ function makePieces(){
     id:p.id, color:p.color, base:p.solution.map(c=>[c[0],c[1]]),
     rot:0, flip:false, placed:false, anchor:null, tray:{x:0,y:0}, placedK:0
   }));
-  cover.clear(); overlapCells.clear();
+  cover.clear(); overlapCells.clear(); offBoardCells.clear();
 }
 // board rotation measured in whole 60° steps (the grid is 6-fold symmetric)
 function boardSteps(){ return ((Math.round(boardAngle/(Math.PI/3))%6)+6)%6; }
@@ -566,11 +567,12 @@ function draw(){
     drawPieceHexes(placedCells(p), 0, 0, boardSize, p.color, 1, selected===idx?'#ffffff':null);
   });
 
-  // flash every cell where two or more pieces intersect
-  if(overlapCells.size){
+  // flash every cell where pieces intersect, or where a placed piece hangs off the board
+  if(overlapCells.size || offBoardCells.size){
     const pulse=0.30+0.45*(0.5+0.5*Math.sin(Date.now()/160));
     ctx.save();
     for(const k of overlapCells){ const [q,r]=k.split(',').map(Number); markCellRed(q,r,pulse); }
+    for(const k of offBoardCells){ if(overlapCells.has(k)) continue; const [q,r]=k.split(',').map(Number); markCellRed(q,r,pulse); }
     ctx.restore();
   }
 
@@ -616,7 +618,7 @@ function draw(){
   }
 }
 // keep the overlap cells pulsing while any intersection exists
-function flashLoop(){ flashRAF=null; draw(); if(overlapCells.size) flashRAF=requestAnimationFrame(flashLoop); }
+function flashLoop(){ flashRAF=null; draw(); if(overlapCells.size || offBoardCells.size) flashRAF=requestAnimationFrame(flashLoop); }
 function startFlash(){ if(flashRAF==null) flashRAF=requestAnimationFrame(flashLoop); }
 function stopFlash(){ if(flashRAF!=null){ cancelAnimationFrame(flashRAF); flashRAF=null; } }
 
@@ -755,9 +757,12 @@ function recompute(){
       a.push(idx);
     }
   });
-  overlapCells.clear();
-  for(const [k,a] of cover) if(a.length>1) overlapCells.add(k);
-  if(overlapCells.size) startFlash(); else stopFlash();
+  overlapCells.clear(); offBoardCells.clear();
+  for(const [k,a] of cover){
+    if(a.length>1) overlapCells.add(k);
+    if(!boardSet.has(k)) offBoardCells.add(k);   // cell hangs off the board edge
+  }
+  if(overlapCells.size || offBoardCells.size) startFlash(); else stopFlash();
 }
 function removeFromBoard(idx){
   const p=pieces[idx];
@@ -913,8 +918,8 @@ function onUp(e){
     }
   } else if(drag.snapCell && drag.valid){
     placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
-    // landing on top of another piece is legal but wrong — say so with a duller sound
-    const clash=p.placed && placedCells(p).some(c=>overlapCells.has(c[0]+','+c[1]));
+    // landing on another piece or hanging off the board is legal but wrong — duller sound
+    const clash=p.placed && placedCells(p).some(c=>overlapCells.has(c[0]+','+c[1]) || !boardSet.has(c[0]+','+c[1]));
     if(clash){ sfx.bad(); haptic([12,40,12]); } else { sfx.place(); haptic(14); }
   } else {
     // dropped off the board -> leave it where released, grabbed hex under the pointer
