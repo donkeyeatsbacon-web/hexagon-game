@@ -1214,9 +1214,10 @@ document.getElementById('submitName').onclick=async ()=>{
   if(name.length<2){ msg.textContent='Please enter a name (at least 2 characters).'; msg.className=''; return; }
   btn.disabled=true; msg.className=''; msg.textContent='Submitting “'+name+'” for approval…';
   try{
-    await submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
+    const r=await submitNameForApproval(pendingSubmit.id, pendingSubmit.num, name, pendingSubmit.layout);
     msg.className='ok';
-    msg.textContent='✓ Submitted! “'+name+'” is pending approval.';
+    msg.textContent = (r && r.message) ? '✓ '+r.message
+      : '✓ Submitted! “'+name+'” is pending approval.';
     input.disabled=true;
   }catch(err){
     btn.disabled=false; msg.className='';

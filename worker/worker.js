@@ -49,6 +49,34 @@ export default {
     const v = validateSolution(data, env);
     if (!v.ok) return json({ error: v.error }, 400, cors);
 
+    const label = env.SUBMISSION_LABEL || 'name-submission';
+    const ghHeaders = {
+      'Authorization': 'Bearer ' + env.GITHUB_TOKEN,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'hexagon-name-worker',
+    };
+
+    // 3.5) De-dupe: if this exact solution already has an OPEN (pending) submission, don't open
+    //      another — a name is already awaiting review for it. We list ALL open issues (that
+    //      listing is fresher than the label-filtered one, which lags for just-created issues)
+    //      and match on both the solution id in the body and the submission label. Fails open:
+    //      if the lookup errors, fall through and create the submission rather than lose it.
+    //      (Rejected/closed issues don't block a fresh attempt, since state=open.)
+    try {
+      const listUrl = `https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/issues?state=open&per_page=100`;
+      const lr = await fetch(listUrl, { headers: ghHeaders });
+      if (lr.ok) {
+        const open = await lr.json();
+        const needle = `"id":"${v.id}"`;   // the compact JSON block the Worker writes contains this
+        const dup = Array.isArray(open) && open.find(it =>
+          typeof it.body === 'string' && it.body.includes(needle) &&
+          Array.isArray(it.labels) && it.labels.some(l => (l && l.name || l) === label));
+        if (dup) return json({ ok: true, duplicate: true, issue: dup.number,
+          message: 'This solution already has a name awaiting review — thanks!' }, 200, cors);
+      }
+    } catch { /* lookup failed → fail open and create the submission below */ }
+
     // 4) Create the GitHub issue server-side (token stays secret)
     const submission = { id: v.id, num: v.num, name, layout: data.layout };
     const title = `Name #${v.num}: ${name}`;
@@ -62,14 +90,8 @@ export default {
     try {
       gh = await fetch(`https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/issues`, {
         method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + env.GITHUB_TOKEN,
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'hexagon-name-worker',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ title, body, labels: [env.SUBMISSION_LABEL || 'name-submission'] }),
+        headers: { ...ghHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, labels: [label] }),
       });
     } catch { return json({ error: 'Submission service is unreachable. Try later.' }, 502, cors); }
 
