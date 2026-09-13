@@ -570,7 +570,7 @@ function draw(){
   // board empty cells
   for(const [q,r] of boardCells){
     const p=axialToPixel(q,r,boardSize);
-    drawCellHex(p.x, p.y, boardSize, '#20232b', '#333846', Math.max(1,boardSize*0.04));
+    drawCellHex(p.x, p.y, boardSize, '#20232b', '#6b7488', Math.max(2,boardSize*0.11));
   }
 
   // placed pieces (overlaps allowed — they just stack)
