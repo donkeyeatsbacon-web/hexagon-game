@@ -203,6 +203,15 @@ function validateSolution(data, env) {
   const h = cyrb53(key);
   const id = h.toString(36);
   const code = solutionCode(id);
-  if (typeof data.id === 'string' && data.id !== id) return { ok: false, error: 'Solution signature mismatch.' };
+
+  // Accept the pre-canonicalisation id as well. Players hold cached copies of the page long
+  // after a deploy, and an old client sends the id of the orientation it happens to be in.
+  // The submission is still a valid, verified tiling -- only its labelling is stale -- so it
+  // is accepted and recorded under the canonical id. Without this, every cached client's
+  // submissions would fail, and the worker could not be deployed before the site.
+  const legacyId = cyrb53(cells.map(([q, r]) => occ.get(q + ',' + r)).join('|')).toString(36);
+  if (typeof data.id === 'string' && data.id !== id && data.id !== legacyId) {
+    return { ok: false, error: 'Solution signature mismatch.' };
+  }
   return { ok: true, id, code };
 }
