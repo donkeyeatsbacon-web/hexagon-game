@@ -168,6 +168,50 @@ function solutionCode(id) {
   return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
 }
 
+// The 14 pieces, one reference placement each, copied from PIECE_DATA in index.html.
+// scripts/check-worker-pieces.mjs asserts this copy still matches the game.
+const PIECE_SHAPES = {
+  P0: [[2,0],[3,-1],[3,0],[3,1],[4,0]],
+  P1: [[0,-4],[0,-3],[1,-4],[1,-3],[1,-2]],
+  P2: [[2,-1],[3,-2],[4,-2],[4,-1]],
+  P3: [[-4,0],[-4,1],[-4,2],[-4,3]],
+  P4: [[-2,-2],[-2,-1],[-2,0],[-1,0],[0,-1]],
+  P5: [[0,1],[0,2],[1,0],[1,1],[1,2]],
+  P6: [[-4,4],[-3,3],[-3,4]],
+  P7: [[-3,-1],[-3,0],[-3,1],[-2,1]],
+  P8: [[-3,2],[-2,2],[-2,3],[-1,1]],
+  P9: [[0,4],[1,3],[2,1],[2,2]],
+  P10: [[3,-4],[3,-3],[4,-4],[4,-3]],
+  P11: [[-2,4],[-1,2],[-1,3],[-1,4],[0,3]],
+  P12: [[0,0],[1,-1],[2,-4],[2,-3],[2,-2]],
+  P13: [[-1,-3],[-1,-2],[-1,-1],[0,-2]],
+};
+
+// Every orientation of every piece, normalised by translation so a submitted piece can be
+// compared against them regardless of where it sits on the board. Any single mirror works
+// here: combined with the six rotations it generates the same twelve orientations as the
+// game's per-piece flip axes.
+function normShape(cells) {
+  const s = cells.map(c => [c[0], c[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const o = s[0];
+  return s.map(c => (c[0] - o[0]) + ',' + (c[1] - o[1])).join(' ');
+}
+const PIECE_ORIENTATIONS = (() => {
+  const rot60 = c => { const x = c[0], z = c[1], y = -x - z; return [-z, -y]; };
+  const mirror = c => [c[1], c[0]];
+  const out = {};
+  for (const [id, base] of Object.entries(PIECE_SHAPES)) {
+    const set = new Set();
+    for (let f = 0; f < 2; f++) for (let r = 0; r < 6; r++) {
+      let t = base.map(c => (f ? mirror(c) : [c[0], c[1]]));
+      for (let k = 0; k < r; k++) t = t.map(rot60);
+      set.add(normShape(t));
+    }
+    out[id] = set;
+  }
+  return out;
+})();
+
 function boardCells() {
   const cells = [];
   for (let q = -BOARD_RADIUS; q <= BOARD_RADIUS; q++)
@@ -184,8 +228,16 @@ function validateSolution(data, env) {
   const cells = boardCells();
   const boardSet = new Set(cells.map(([q, r]) => q + ',' + r));
   const occ = new Map();                                  // "q,r" -> piece id
+  const used = new Set();
   for (const p of layout) {
     if (!p || typeof p.id !== 'string' || !Array.isArray(p.cells)) return { ok: false, error: 'Malformed layout.' };
+    // Covering the board without overlaps is not enough on its own: without these three
+    // checks any partition of the 61 cells into groups labelled P0..P13 would validate, and
+    // a crafted request could mint an id for a board the game cannot actually produce.
+    if (!PIECE_ORIENTATIONS[p.id]) return { ok: false, error: 'Unknown piece.' };
+    if (used.has(p.id)) return { ok: false, error: 'A piece is used more than once.' };
+    used.add(p.id);
+    if (!PIECE_ORIENTATIONS[p.id].has(normShape(p.cells))) return { ok: false, error: 'A piece is the wrong shape.' };
     for (const c of p.cells) {
       if (!Array.isArray(c) || c.length !== 2) return { ok: false, error: 'Malformed cell.' };
       const k = c[0] + ',' + c[1];
@@ -194,6 +246,7 @@ function validateSolution(data, env) {
       occ.set(k, p.id);
     }
   }
+  if (used.size !== Object.keys(PIECE_SHAPES).length) return { ok: false, error: 'Not every piece was used.' };
   if (occ.size !== cells.length) return { ok: false, error: 'The board is not completely filled.' };
 
   // Rebuild the canonical key the client hashes: the lexicographically smallest of the

@@ -9,6 +9,7 @@
     "assets": "node scripts/make-assets.mjs",
     "screenshots": "node scripts/make-screenshots.mjs",
     "check-listing": "node scripts/check-listing.mjs",
+    "check-worker": "node scripts/check-worker-pieces.mjs",
     "sync": "npm run build && cap sync",
     "android": "npm run sync && cap open android",
     "ios": "npm run sync && cap open ios"
