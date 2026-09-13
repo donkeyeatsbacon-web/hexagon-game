@@ -158,7 +158,7 @@
       <span><kbd>tap</kbd> / <kbd>R</kbd> rotate</span>
       <span><kbd>hold</kbd> rotate/flip menu</span>
       <span><kbd>drag ring</kbd> turn board</span>
-      <span>overlaps flash <span style="color:#ff5a44">red</span></span>
+      <span>bad cells flash <span style="color:#ffffff">white</span></span>
     </div>
     <div id="win"><div class="card">
       <h2>🎉 Solved!</h2>
@@ -201,8 +201,8 @@
           <span class="tx">Opens a menu to rotate either way, or flip the piece over.</span></div></li>
         <li><span class="ico">◎</span><div><b>Drag the outer ring</b>
           <span class="tx">Turns the whole board in 60° steps, pieces and all.</span></div></li>
-        <li><span class="ico">🔴</span><div><b>Red flashing cells</b>
-          <span class="tx">Two pieces overlap there — move one of them away.</span></div></li>
+        <li><span class="ico">⚪</span><div><b>White flashing cells</b>
+          <span class="tx">Two pieces overlap there, or a piece hangs off the board — move it.</span></div></li>
       </ul>
       <button class="btn primary" id="tutClose">Got it</button>
       <!-- target=_blank so the packaged app hands this to the system browser instead of
@@ -306,8 +306,8 @@ for(let q=-BOARD_RADIUS;q<=BOARD_RADIUS;q++)
 /* ---------- game state ---------- */
 let pieces = [];        // {id,color,base,rot,flip,placed,anchor:{q,r}|null,tray:{x,y}}
 let cover = new Map();  // "q,r" -> [piece indices covering this cell] (overlaps allowed)
-let overlapCells = new Set(); // cells covered by 2+ pieces -> flash red
-let offBoardCells = new Set(); // placed-piece cells hanging off the board -> flash red
+let overlapCells = new Set(); // cells covered by 2+ pieces -> flash white
+let offBoardCells = new Set(); // placed-piece cells hanging off the board -> flash white
 let flashRAF = null;    // requestAnimationFrame handle for the overlap flash
 let drag = null;        // {idx, mx,my, moved, ...}
 let menu = null;        // {idx, r, buttons:[...]} radial action menu shown after a long-press
@@ -529,11 +529,11 @@ function drawPieceHexes(cells, cx, cy, size, color, alpha, highlight){
   ctx.restore();
 }
 
-// red overlay on a single board cell (used for overlap flash + bad preview cells)
-function markCellRed(q, r, alpha){
+// white overlay on a single board cell (used for the overlap/off-board flash + bad preview cells)
+function markCellBad(q, r, alpha){
   const p=axialToPixel(q,r,boardSize);   // drawn inside the rotated board frame (origin at centre)
-  if(alpha){ ctx.globalAlpha=alpha; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, '#e5533c', null); }
-  ctx.globalAlpha=1; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, null, '#ff2a1a', Math.max(2,boardSize*0.12));
+  if(alpha){ ctx.globalAlpha=alpha; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, '#ffffff', null); }
+  ctx.globalAlpha=1; drawCellHex(p.x, p.y-boardSize*0.07, boardSize, null, '#ffffff', Math.max(2,boardSize*0.12));
 }
 // the grippable knurled ring around the board (drawn inside the rotated frame so it spins)
 function drawBorder(hot){
@@ -583,8 +583,8 @@ function draw(){
   if(overlapCells.size || offBoardCells.size){
     const pulse=0.30+0.45*(0.5+0.5*Math.sin(Date.now()/160));
     ctx.save();
-    for(const k of overlapCells){ const [q,r]=k.split(',').map(Number); markCellRed(q,r,pulse); }
-    for(const k of offBoardCells){ if(overlapCells.has(k)) continue; const [q,r]=k.split(',').map(Number); markCellRed(q,r,pulse); }
+    for(const k of overlapCells){ const [q,r]=k.split(',').map(Number); markCellBad(q,r,pulse); }
+    for(const k of offBoardCells){ if(overlapCells.has(k)) continue; const [q,r]=k.split(',').map(Number); markCellBad(q,r,pulse); }
     ctx.restore();
   }
 
@@ -596,7 +596,7 @@ function draw(){
     // outline cells that would overlap an existing piece (off-board overhang is allowed)
     ctx.save();
     for(const c of cells){ const k=c[0]+','+c[1];
-      if(cover.has(k)) markCellRed(c[0],c[1],0); }
+      if(cover.has(k)) markCellBad(c[0],c[1],0); }
     ctx.restore();
   }
   ctx.restore();
