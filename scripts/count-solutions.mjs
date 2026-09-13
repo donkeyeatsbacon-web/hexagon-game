@@ -52,7 +52,11 @@ const rowMeta = [];     // { piece, cells }
 for (let p = 0; p < N_PIECES; p++) {
   const base = PIECE_DATA[p].solution;
   const seen = new Set();                       // dedupe symmetric orientations
-  for (let flip = 0; flip < 2; flip++) {
+  // --no-flip models one-sided pieces (rotate only, never turn over). The game exposes a Flip
+  // button, so reflections are legal in-game -- but if the physical pieces were printed on one
+  // side, the real puzzle's solution count would be this smaller number.
+  const flipLimit = process.argv.includes('--no-flip') ? 1 : 2;
+  for (let flip = 0; flip < flipLimit; flip++) {
     for (let rot = 0; rot < 6; rot++) {
       const t = transformCells(base, rot, !!flip);
       const o = t[0];

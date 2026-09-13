@@ -1031,12 +1031,86 @@ function cyrb53(str, seed){        // fast 53-bit string hash
   h2=Math.imul(h2^(h2>>>16),2246822507); h2^=Math.imul(h1^(h1>>>13),3266489909);
   return 4294967296*(2097151&h2)+(h1>>>0);
 }
-function solutionKey(){ // stable string: which piece fills each board cell (one per cell when solved)
-  return boardCells.map(([q,r])=>{ const a=cover.get(q+","+r); return a&&a.length? pieces[a[0]].id : '_'; }).join('|');
+/* The 12 board symmetries (6 rotations x mirror), as permutations of the boardCells order.
+   Built once; the grid maps onto itself under all of them. */
+const SYMMETRIES = (()=>{
+  // A board-wide mirror. Pieces flip across their own axes (FLIP_MAT), but for canonicalising
+  // a whole board any single reflection works: combined with the six rotations it generates
+  // the same twelve symmetries whichever mirror you pick.
+  const mirror = c => [c[1], c[0]];
+  const pos = new Map(boardCells.map(([q,r],i)=>[q+","+r, i]));
+  const out = [];
+  for(let flip=0; flip<2; flip++) for(let rot=0; rot<6; rot++){
+    const perm = new Array(boardCells.length);
+    boardCells.forEach(([q,r],i)=>{
+      let c = flip ? mirror([q,r]) : [q,r];
+      for(let k=0;k<rot;k++) c = rot60(c);
+      perm[i] = pos.get(c[0]+","+c[1]);
+    });
+    out.push(perm);
+  }
+  return out;
+})();
+// Which piece fills each board cell, for one particular orientation of the board.
+function assignmentKey(assign, perm){
+  const out = new Array(assign.length);
+  for(let i=0;i<assign.length;i++) out[perm[i]] = assign[i];
+  return out.join('|');
+}
+/* Canonical key for the filling currently on the board: the lexicographically smallest of its
+   12 orientations. Rebuilding the same pattern rotated or mirrored therefore yields the SAME
+   key, and so the same id and solution code -- it is one solution, found again, not a new one.
+   (Spinning the grip ring never affected this; it only changes how the board is drawn.) */
+function solutionKey(){
+  const assign = boardCells.map(([q,r])=>{ const a=cover.get(q+","+r); return a&&a.length? pieces[a[0]].id : '_'; });
+  let best = null;
+  for(const perm of SYMMETRIES){
+    const k = assignmentKey(assign, perm);
+    if(best === null || k < best) best = k;
+  }
+  return best;
+}
+// The pre-canonicalisation key, kept only so collections and approved names saved under the
+// old scheme can be recognised and re-keyed rather than silently orphaned.
+function legacySolutionKeyFromLayout(layout){
+  const at = new Map();
+  for(const p of layout) for(const c of p.cells) at.set(c[0]+","+c[1], p.id);
+  return boardCells.map(([q,r])=> at.get(q+","+r) || '_').join('|');
+}
+function canonicalIdFromLayout(layout){
+  const at = new Map();
+  for(const p of layout) for(const c of p.cells) at.set(c[0]+","+c[1], p.id);
+  const assign = boardCells.map(([q,r])=> at.get(q+","+r) || '_');
+  let best = null;
+  for(const perm of SYMMETRIES){
+    const k = assignmentKey(assign, perm);
+    if(best === null || k < best) best = k;
+  }
+  return cyrb53(best).toString(36);
 }
 function currentLayout(){ return pieces.map(p=>({id:p.id, color:p.color, cells:placedCells(p)})); }
-function loadCollection(){ try{ return JSON.parse(localStorage.getItem('hexSolvedV1')||'{}'); }catch(e){ return {}; } }
-function saveCollection(c){ try{ localStorage.setItem('hexSolvedV1', JSON.stringify(c)); }catch(e){} }
+/* V2 keys entries by the canonical (rotation-independent) id. A V1 collection is re-keyed
+   once, from the layout each entry already stores, so nothing is lost — and any rotated
+   duplicates of one pattern, which V1 recorded as separate finds, merge into a single entry
+   keeping the earliest date and any name. */
+function loadCollection(){
+  try{
+    const v2=localStorage.getItem('hexSolvedV2');
+    if(v2) return JSON.parse(v2);
+    const old=JSON.parse(localStorage.getItem('hexSolvedV1')||'{}');
+    const out={};
+    for(const [id,rec] of Object.entries(old)){
+      const key=(rec && Array.isArray(rec.layout)) ? canonicalIdFromLayout(rec.layout) : id;
+      if(out[key]){
+        if(rec.date && rec.date<out[key].date) out[key].date=rec.date;
+        if(rec.name && !out[key].name) out[key].name=rec.name;
+      } else out[key]={...rec};
+    }
+    try{ localStorage.setItem('hexSolvedV2', JSON.stringify(out)); }catch(e){}
+    return out;
+  }catch(e){ return {}; }
+}
+function saveCollection(c){ try{ localStorage.setItem('hexSolvedV2', JSON.stringify(c)); }catch(e){} }
 function updateSolCount(){ document.getElementById('solCount').textContent=Object.keys(loadCollection()).length; }
 
 /* ---------- in-progress save/restore ----------

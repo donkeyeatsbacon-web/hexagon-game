@@ -134,6 +134,35 @@ function cyrb53(str, seed = 0) {
 }
 
 // Must match solutionCode() in index.html so an issue title matches what the player saw.
+// The 12 board symmetries, as permutations of the boardCells order.
+function symmetries(cells) {
+  const pos = new Map(cells.map(([q, r], i) => [q + ',' + r, i]));
+  const rot60 = c => { const x = c[0], z = c[1], y = -x - z; return [-z, -y]; };
+  const reflect = c => [c[1], c[0]];
+  const out = [];
+  for (let flip = 0; flip < 2; flip++) for (let rot = 0; rot < 6; rot++) {
+    const perm = new Array(cells.length);
+    cells.forEach(([q, r], i) => {
+      let c = flip ? reflect([q, r]) : [q, r];
+      for (let k = 0; k < rot; k++) c = rot60(c);
+      perm[i] = pos.get(c[0] + ',' + c[1]);
+    });
+    out.push(perm);
+  }
+  return out;
+}
+function canonicalKey(cells, occ) {
+  const assign = cells.map(([q, r]) => occ.get(q + ',' + r) || '_');
+  let best = null;
+  for (const perm of symmetries(cells)) {
+    const out = new Array(assign.length);
+    for (let i = 0; i < assign.length; i++) out[perm[i]] = assign[i];
+    const k = out.join('|');
+    if (best === null || k < best) best = k;
+  }
+  return best;
+}
+
 function solutionCode(id) {
   const s = String(id).toUpperCase().padStart(11, '0');
   return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
@@ -167,8 +196,10 @@ function validateSolution(data, env) {
   }
   if (occ.size !== cells.length) return { ok: false, error: 'The board is not completely filled.' };
 
-  // rebuild the exact key string the client hashes (board cells in q-asc, r-asc order)
-  const key = cells.map(([q, r]) => occ.get(q + ',' + r)).join('|');
+  // Rebuild the canonical key the client hashes: the lexicographically smallest of the
+  // filling's 12 orientations, so a pattern and its rotations share one id. This must match
+  // solutionKey() in index.html exactly or every submission fails the signature check.
+  const key = canonicalKey(cells, occ);
   const h = cyrb53(key);
   const id = h.toString(36);
   const code = solutionCode(id);

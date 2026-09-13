@@ -137,12 +137,12 @@ async function loadPending(){
     const payload=parsePayload(issue.body);
     const card=document.createElement('div'); card.className='card';
     const name = payload ? payload.name : '(unparseable — open the issue)';
-    const num = payload ? payload.num : '?';
+    const code = payload ? (payload.code || payload.id || '?') : '?';
     const top=document.createElement('div'); top.className='top';
     const cv=document.createElement('canvas'); top.appendChild(cv);
     const info=document.createElement('div');
     info.innerHTML='<div class="name">“'+esc(name)+'”</div>'+
-      '<div class="meta">solution #'+esc(num)+' · by <b>'+esc(issue.user&&issue.user.login||'?')+'</b><br>'+
+      '<div class="meta">solution '+esc(code)+' · by <b>'+esc(issue.user&&issue.user.login||'?')+'</b><br>'+
       '<a href="'+esc(issue.html_url)+'" target="_blank" rel="noopener">issue #'+issue.number+'</a></div>';
     top.appendChild(info);
     card.appendChild(top);
@@ -173,9 +173,9 @@ async function approve(payload, issueNumber){
   const g=await gh('/repos/'+O+'/'+R+'/contents/'+path+'?ref=main');
   if(g.status===200){ const j=await g.json(); sha=j.sha; try{ data=JSON.parse(b64decode(j.content))||{}; }catch(e){ data={}; } }
   else if(g.status!==404){ throw new Error('reading approved-names.json ('+g.status+')'); }
-  data[payload.id]={ name:payload.name, num:payload.num, approvedAt:new Date().toISOString(), issue:issueNumber };
+  data[payload.id]={ name:payload.name, code:payload.code, approvedAt:new Date().toISOString(), issue:issueNumber };
   const put=await gh('/repos/'+O+'/'+R+'/contents/'+path,{method:'PUT',body:JSON.stringify({
-    message:'Approve name "'+payload.name+'" for solution #'+payload.num,
+    message:'Approve name "'+payload.name+'" for solution '+(payload.code||payload.id),
     content:b64encode(JSON.stringify(data,null,2)+'\n'),
     sha: sha||undefined,
     branch:'main'
