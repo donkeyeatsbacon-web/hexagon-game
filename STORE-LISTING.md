@@ -28,7 +28,7 @@ That is the whole game. There is no timer pressure, no lives, no energy meter an
 
 FIND YOUR OWN SOLUTIONS
 
-The board can be filled 817,984 different ways. Each one you discover is numbered and added to your personal collection, so solving it again never feels like repeating yourself — you are looking for an arrangement you have not seen before.
+There are millions of ways to fill the board, and almost none of them have been found yet. Every solution you discover gets its own code and joins your collection, so solving it again is never repeating yourself — you are hunting for an arrangement nobody has turned up before.
 
 NAME WHAT YOU FIND
 
@@ -60,12 +60,12 @@ Hexagon Puzzle
 
 **Subtitle** (max 30)
 ```
-One hexagon. 817,984 answers
+Be first to find a new one
 ```
 
 **Promotional text** (max 170, editable without review)
 ```
-Every board you solve is numbered and saved to your collection. Find one nobody has named yet, and the name you choose is shown to everyone who finds it after you.
+Most solutions have never been found by anyone. Turn one up and it is yours to name — and your name is shown to every player who finds that same arrangement after you.
 ```
 
 **Keywords** (max 100, comma-separated — no spaces, they waste characters)

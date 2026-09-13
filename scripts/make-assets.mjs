@@ -138,7 +138,7 @@ function featureGraphic() {
     `<g transform="translate(60,0)">${inner}</g>` +
     `<text x="620" y="228" font-family="Helvetica,Arial,sans-serif" font-size="76" font-weight="700" fill="#eef1f6">Hexagon</text>` +
     `<text x="622" y="286" font-family="Helvetica,Arial,sans-serif" font-size="29" fill="#9aa3b2">Fit every piece.</text>` +
-    `<text x="622" y="328" font-family="Helvetica,Arial,sans-serif" font-size="29" fill="#f0a020">817,984 ways to win.</text>` +
+    `<text x="622" y="328" font-family="Helvetica,Arial,sans-serif" font-size="29" fill="#f0a020">Find one nobody has found.</text>` +
     `</svg>`;
 }
 
