@@ -122,6 +122,23 @@
   #tut .btn{width:100%;padding:11px;font-size:14px;}
   #tut .legal{margin:12px 0 0;text-align:center;font-size:11.5px;}
   #tut .legal a{color:var(--muted);}
+  /* name-approved celebration — above every other overlay, dismissed only by its button */
+  #approved{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:8;
+    background:rgba(10,12,16,.92);
+    padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+            calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));}
+  #fireworks{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;}
+  #approved .card{position:relative;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;padding:24px 22px;max-width:380px;width:100%;text-align:center;
+    max-height:100%;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  #approved h2{margin:0 0 14px;font-size:20px;line-height:1.3;}
+  #approved .sub{margin:14px 0 18px;color:var(--muted);font-size:12.5px;}
+  #approved .btn{width:100%;padding:11px;font-size:14px;}
+  #approved .an{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;margin:8px 0;}
+  #approved .an b{display:block;color:var(--accent);font-size:19px;line-height:1.25;}
+  #approved .an span{display:block;margin-top:4px;color:var(--muted);font-size:11.5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.3px;}
   /* Phones: the toolbar was wrapping to six rows and eating ~16% of the screen. Drop what
      touch already covers — rotate/flip are reachable by tapping a piece and by the
      press-and-hold menu (both taught in the tutorial) — and shorten the rest. */
@@ -213,6 +230,15 @@
            navigating the WebView off the game with no way back -->
       <p class="legal"><a id="privacyLink" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
     </div></div>
+    <div id="approved">
+      <canvas id="fireworks"></canvas>
+      <div class="card">
+        <h2>🎉 Your solution name was approved!</h2>
+        <div id="approvedList"></div>
+        <p class="sub">It now shows to every player who finds that solution.</p>
+        <button class="btn primary" id="approvedClose">OK</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -244,6 +270,37 @@ async function loadApprovedNames(){
     const r = await fetch(NAMES_URL+'?_='+Date.now(), {cache:'no-store'});
     if(r.ok) approvedNames = await r.json();
   }catch(e){ /* offline / not published yet — names just won't show */ }
+}
+
+/* ---------- "your name was approved" ----------
+   Approval happens elsewhere, hours or days later, and there is nothing to push a message to
+   this device. So the client remembers what it submitted and reconciles against the published
+   list on the next load: an entry that has since appeared, with the name this device sent, was
+   ours. Matching on the name matters — another player may have named the same solution first,
+   in which case the entry exists but is not ours to celebrate. */
+const PENDING_NAMES_KEY='hexPendingNamesV1';
+function loadPendingNames(){ try{ return JSON.parse(localStorage.getItem(PENDING_NAMES_KEY)||'{}'); }catch(e){ return {}; } }
+function savePendingNames(p){ try{ localStorage.setItem(PENDING_NAMES_KEY, JSON.stringify(p)); }catch(e){} }
+function rememberSubmission(id, name){
+  const p=loadPendingNames();
+  p[id]={name, at:Date.now()};
+  savePendingNames(p);
+}
+// Returns the submissions of ours that have since been approved, and forgets every entry that
+// has been resolved one way or the other so nothing is celebrated twice.
+function collectApprovedSubmissions(){
+  const pending=loadPendingNames();
+  const mine=[];
+  let changed=false;
+  for(const id of Object.keys(pending)){
+    const a=approvedNames[id];
+    if(!a) continue;                                  // still awaiting review — keep waiting
+    if(a.name===pending[id].name) mine.push({id, name:a.name});
+    delete pending[id];                               // decided either way; stop tracking it
+    changed=true;
+  }
+  if(changed) savePendingNames(pending);
+  return mine;
 }
 // POST the submission to the Worker (no GitHub login needed). Resolves on success, throws on error.
 async function submitNameForApproval(id, code, name, layout){
@@ -654,6 +711,9 @@ function openOverlay(id){
 }
 function closeOverlay(id){
   document.getElementById(id).style.display='none';
+  // Whichever route closed it — the button, hardware Back, a popstate — the fireworks loop
+  // must stop, or it keeps animating and burning CPU behind a hidden overlay.
+  if(id==='approved') stopFireworks();
   const i=overlayStack.lastIndexOf(id);
   if(i<0) return;                      // never opened through the stack (e.g. boot-time reset)
   overlayStack.splice(i,1);
@@ -1307,6 +1367,7 @@ document.getElementById('submitName').onclick=async ()=>{
   btn.disabled=true; msg.className=''; msg.textContent='Submitting “'+name+'” for approval…';
   try{
     const r=await submitNameForApproval(pendingSubmit.id, pendingSubmit.code, name, pendingSubmit.layout);
+    rememberSubmission(pendingSubmit.id, name);   // so approval can be celebrated on a later visit
     msg.className='ok';
     msg.textContent = (r && r.message) ? '✓ '+r.message
       : '✓ Submitted! “'+name+'” is pending approval.';
@@ -1334,6 +1395,77 @@ canvas.addEventListener('touchmove',onMove,{passive:false});
 canvas.addEventListener('touchend',onUp,{passive:false});
 canvas.addEventListener('touchcancel',cancelDrag,{passive:false});
 
+/* ---------- fireworks behind the approval card ----------
+   Self-contained on its own canvas so it never touches the board's rendering. The loop is
+   started when the card opens and cancelled when it closes, so nothing keeps animating (or
+   keeps the CPU awake) behind a dismissed overlay. */
+let fwRAF=null, fwParticles=[], fwNext=0;
+const FW_COLORS=['#F20C0C','#0CC4F2','#FFD632','#0CF2AD','#E500FF','#FF8E32','#327AFF','#CBFF00'];
+function fwBurst(cv, x, y){
+  const n=28+Math.floor(Math.random()*18);
+  const hue=FW_COLORS[Math.floor(Math.random()*FW_COLORS.length)];
+  const speed=1.6+Math.random()*1.7;
+  for(let i=0;i<n;i++){
+    const a=(i/n)*Math.PI*2 + Math.random()*0.2;
+    const s=speed*(0.55+Math.random()*0.75);
+    fwParticles.push({x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life:1, color:hue,
+                      size:1.6+Math.random()*1.8});
+  }
+}
+function fwLoop(cv){
+  const ctx2=cv.getContext('2d');
+  const DPR=Math.min(window.devicePixelRatio||1,2);
+  const w=cv.clientWidth, h=cv.clientHeight;
+  if(cv.width!==Math.floor(w*DPR)||cv.height!==Math.floor(h*DPR)){
+    cv.width=Math.floor(w*DPR); cv.height=Math.floor(h*DPR);
+  }
+  ctx2.setTransform(DPR,0,0,DPR,0,0);
+  ctx2.clearRect(0,0,w,h);
+  if(--fwNext<=0){ fwNext=18+Math.floor(Math.random()*26);
+    fwBurst(cv, w*(0.15+Math.random()*0.7), h*(0.12+Math.random()*0.45)); }
+  for(const p of fwParticles){
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.035; p.vx*=0.988; p.vy*=0.988; p.life-=0.011;
+  }
+  fwParticles=fwParticles.filter(p=>p.life>0);
+  for(const p of fwParticles){
+    ctx2.globalAlpha=Math.max(0,p.life);
+    ctx2.fillStyle=p.color;
+    ctx2.beginPath(); ctx2.arc(p.x,p.y,p.size,0,Math.PI*2); ctx2.fill();
+  }
+  ctx2.globalAlpha=1;
+  fwRAF=requestAnimationFrame(()=>fwLoop(cv));
+}
+function startFireworks(){
+  const cv=document.getElementById('fireworks');
+  // Respect a reduced-motion preference: the celebration still shows, it just holds still.
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  fwParticles=[]; fwNext=0;
+  if(fwRAF==null) fwLoop(cv);
+}
+function stopFireworks(){
+  if(fwRAF!=null){ cancelAnimationFrame(fwRAF); fwRAF=null; }
+  fwParticles=[];
+  const cv=document.getElementById('fireworks');
+  const ctx2=cv.getContext('2d');
+  ctx2.setTransform(1,0,0,1,0,0); ctx2.clearRect(0,0,cv.width,cv.height);
+}
+function showApproved(items){
+  const list=document.getElementById('approvedList');
+  list.innerHTML='';
+  for(const it of items){
+    const d=document.createElement('div'); d.className='an';
+    const b=document.createElement('b'); b.textContent='“'+it.name+'”'; d.appendChild(b);
+    const s=document.createElement('span'); s.textContent=solutionCode(it.id); d.appendChild(s);
+    list.appendChild(d);
+  }
+  document.querySelector('#approved h2').textContent =
+    items.length>1 ? '🎉 Your solution names were approved!' : '🎉 Your solution name was approved!';
+  openOverlay('approved');
+  startFireworks();
+  sfx.win(); haptic([18,60,18,60,34]);
+}
+document.getElementById('approvedClose').onclick=()=>closeOverlay('approved');
+
 /* ---------- first-run tutorial ---------- */
 const TUT_KEY='hexTutorialV1';
 function showTutorial(){ openOverlay('tut'); }
@@ -1360,7 +1492,12 @@ setSound(soundOn);     // paint the toggle to match the stored preference
 document.getElementById('tutCount').textContent=pieces.length;
 let tutSeen=false; try{ tutSeen=localStorage.getItem(TUT_KEY)==='1'; }catch(e){}
 if(!tutSeen) showTutorial();
-loadApprovedNames();   // fetch the published approved names (async, non-blocking)
+// Fetch the published names, then see whether any name this device submitted has since been
+// approved. Non-blocking: the game is fully playable while this is in flight.
+loadApprovedNames().then(()=>{
+  const mine=collectApprovedSubmissions();
+  if(mine.length) showApproved(mine);
+});
 </script>
 </body>
 </html>
