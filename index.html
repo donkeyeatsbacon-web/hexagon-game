@@ -102,6 +102,18 @@
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.3px;}
   .sol .sd{color:var(--muted);font-size:11px;}
   #gallery .empty{color:var(--muted);grid-column:1/-1;text-align:center;padding:40px;}
+  /* per-solution naming state in the gallery */
+  .nstatus{margin-top:7px;font-size:11px;line-height:1.35;}
+  .nstatus.named{color:var(--good);font-weight:700;}
+  .nstatus.waiting{color:#e0b050;overflow:hidden;text-overflow:ellipsis;}
+  .nstatus .nameBtn{padding:5px 10px;font-size:11.5px;width:100%;}
+  .nstatus .nrow{display:flex;gap:5px;}
+  .nstatus .nrow input{flex:1;min-width:0;background:var(--panel2);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:11.5px;font-family:inherit;}
+  .nstatus .nrow input:focus{outline:none;border-color:var(--accent);}
+  .nstatus .nrow .btn{padding:5px 9px;font-size:11.5px;}
+  .nstatus .nnote{margin-top:4px;color:var(--muted);font-size:10.5px;}
+  .nstatus .nnote.bad{color:var(--bad);}
   /* first-run tutorial — the .hint bar is hidden on phones, so this is the only place
      touch players ever learn the controls */
   #tut{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:7;
@@ -1266,7 +1278,12 @@ function renderNaming(id, code, layout, approved){
   } else {
     nameEl.style.display='none';
     submitEl.style.display='';
-    document.getElementById('nameInput').value='';
+    const input=document.getElementById('nameInput');
+    input.value='';
+    // The submit handler disables the field on success. Without re-enabling it here, a player
+    // who named one solution found the box dead for every solution afterwards — the form
+    // looked ready, with an active button above an input that would not accept typing.
+    input.disabled=false;
     document.getElementById('submitName').disabled=false;
     pendingSubmit={id, code, layout};
   }
@@ -1298,6 +1315,54 @@ function drawSolMini(canvas, layout){
     c.lineWidth=0.6; c.strokeStyle='rgba(255,255,255,.45)'; c.stroke();
   });
 }
+/* One solution's naming state in the gallery: already named, waiting on review, or still
+   unclaimed — and in the last case an inline form, so a name can be proposed for a solution
+   found days ago rather than only in the moments right after solving it. */
+function namingStatus(id, rec, approvedName, pendingEntry){
+  const wrap=document.createElement('div'); wrap.className='nstatus';
+  if(approvedName){
+    wrap.classList.add('named');
+    wrap.textContent='✓ Named';
+    return wrap;
+  }
+  if(pendingEntry){
+    wrap.classList.add('waiting');
+    wrap.textContent='⏳ “'+pendingEntry.name+'” awaiting review';
+    wrap.title='Submitted '+new Date(pendingEntry.at).toLocaleDateString();
+    return wrap;
+  }
+  const btn=document.createElement('button');
+  btn.className='btn nameBtn'; btn.textContent='Name it';
+  btn.onclick=()=>{
+    wrap.innerHTML='';
+    const row=document.createElement('div'); row.className='nrow';
+    const inp=document.createElement('input'); inp.maxLength=40; inp.placeholder='Name this solution…';
+    const go=document.createElement('button'); go.className='btn primary'; go.textContent='Submit';
+    const note=document.createElement('div'); note.className='nnote';
+    row.appendChild(inp); row.appendChild(go);
+    wrap.appendChild(row); wrap.appendChild(note);
+    inp.focus();
+    const send=async ()=>{
+      const v=inp.value.trim();
+      if(v.length<2){ note.textContent='At least 2 characters.'; return; }
+      go.disabled=true; inp.disabled=true; note.className='nnote'; note.textContent='Submitting…';
+      try{
+        const r=await submitNameForApproval(id, solutionCode(id), v, rec.layout);
+        rememberSubmission(id, v);
+        wrap.className='nstatus waiting';
+        wrap.textContent='⏳ “'+v+'” awaiting review';
+      }catch(err){
+        go.disabled=false; inp.disabled=false;
+        note.className='nnote bad';
+        note.textContent=err.message||'Could not submit — try again later.';
+      }
+    };
+    go.onclick=send;
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); send(); } });
+  };
+  wrap.appendChild(btn);
+  return wrap;
+}
 async function openCollection(){
   await loadApprovedNames();            // pull the latest approved names before rendering
   const col=loadCollection();
@@ -1306,6 +1371,7 @@ async function openCollection(){
     entries.length+(entries.length===1?' solution collected':' solutions collected');
   const g=document.getElementById('gallery'); g.innerHTML='';
   if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
+  const pending=loadPendingNames();
   entries.forEach(([id,rec])=>{
     const name=(approvedNames[id] && approvedNames[id].name) || rec.name;
     const d=document.createElement('div'); d.className='sol';
@@ -1314,6 +1380,9 @@ async function openCollection(){
     const sn=document.createElement('div'); sn.className='sn'; sn.textContent=solutionCode(id); d.appendChild(sn);
     if(name){ const nm=document.createElement('div'); nm.className='sname'; nm.textContent='“'+name+'”'; nm.title=name; d.appendChild(nm); }
     const sd=document.createElement('div'); sd.className='sd'; sd.textContent=new Date(rec.date).toLocaleDateString(); d.appendChild(sd);
+    // Naming status, so a player can tell at a glance which of their solutions are named,
+    // which are still with the reviewer, and which they could still claim a name for.
+    d.appendChild(namingStatus(id, rec, name, pending[id]));
     g.appendChild(d); drawSolMini(cv, rec.layout);
   });
   openOverlay('collection');
