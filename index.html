@@ -451,6 +451,41 @@ function resize(){
 }
 let lastLayout=null;   // {ox,oy,S} the tray was last laid out against, for proportional rescaling
 function markLayout(){ lastLayout={ox:boardOx, oy:boardOy, S:Math.min(W,H)}; }
+
+/* Keep loose pieces off the grip ring. A piece parked on the ring hides it, and pick() tests
+   tray pieces before the ring, so the drag that turns the board goes to the piece instead --
+   leaving no way to rotate at all. Rather than refuse the drop, which would make the piece
+   jump back somewhere the player did not choose, let it land and slide it straight out. */
+function clampTrayToCanvas(p){
+  const m=2;
+  const b=pieceBBox(p, traySize);
+  if(b.maxx-b.minx <= W-2*m) p.tray.x=Math.min(Math.max(p.tray.x, m-b.minx), W-m-b.maxx);
+  if(b.maxy-b.miny <= H-2*m) p.tray.y=Math.min(Math.max(p.tray.y, m-b.miny), H-m-b.maxy);
+}
+function trayCellCentres(p){
+  return orientedOffsets(p).map(o=>{
+    const c=axialToPixel(o[0],o[1],traySize);
+    return [p.tray.x+c.x, p.tray.y+c.y];
+  });
+}
+function overlapsRing(p){
+  const need=borderOuter+traySize*0.9;   // allow for the hex's own radius
+  return trayCellCentres(p).some(([x,y])=>Math.hypot(x-boardOx, y-boardOy) < need);
+}
+function pushClearOfRing(p){
+  if(!overlapsRing(p)) return;
+  const cs=trayCellCentres(p);
+  let cx=0, cy=0;
+  for(const [x,y] of cs){ cx+=x; cy+=y; }
+  cx/=cs.length; cy/=cs.length;
+  let dx=cx-boardOx, dy=cy-boardOy;
+  const d=Math.hypot(dx,dy);
+  // dropped dead centre, so "outwards" has no direction — send it downwards, which is reachable
+  if(d<1e-6){ dx=0; dy=1; } else { dx/=d; dy/=d; }
+  const step=Math.max(2, traySize*0.5);
+  for(let i=0;i<500 && overlapsRing(p); i++){ p.tray.x+=dx*step; p.tray.y+=dy*step; }
+  clampTrayToCanvas(p);
+}
 function rescaleTray(prev){
   const k=(Math.min(W,H)||1)/prev.S;
   traySize=Math.max(4, traySize*k);
@@ -466,6 +501,9 @@ function rescaleTray(prev){
     if(b.maxx-b.minx <= W-2*m) x=Math.min(Math.max(x, m-b.minx), W-m-b.maxx);
     if(b.maxy-b.miny <= H-2*m) y=Math.min(Math.max(y, m-b.miny), H-m-b.maxy);
     p.tray.x=x; p.tray.y=y;
+    // A big aspect change shrinks the ring's surroundings too, so a piece that was clear
+    // before the resize can end up sitting on it afterwards.
+    if(!p.placed) pushClearOfRing(p);
   }
 }
 
@@ -811,8 +849,17 @@ function pick(px,py){
   }
   // placed pieces — return the topmost (last-drawn) piece covering this cell
   const cell=screenToBoardCell(px, py);
-  const a=cover.get(cell.q+","+cell.r);
-  if(a && a.length) return {idx:Math.max(...a), kind:'board'};
+  const onBoard=boardSet.has(cell.q+","+cell.r);
+  const ringBand=(()=>{ const d=Math.hypot(px-boardOx, py-boardOy);
+    return d>=borderInner-4 && d<=borderOuter+4; })();
+  // A placed piece may hang past the board's edge, and that overhang can lie across the grip
+  // ring. Grabbing there must turn the board, not seize the piece, or a single overhanging
+  // piece makes the board unturnable. Only the overhang defers: every placed piece keeps at
+  // least one cell on the board (placement requires it), so it is always grabbable there.
+  if(!(ringBand && !onBoard)){
+    const a=cover.get(cell.q+","+cell.r);
+    if(a && a.length) return {idx:Math.max(...a), kind:'board'};
+  }
   // Forgiving fallback for touch. Tray hexes are only ~12px across (they scale up to board
   // size the moment you grab one), so demanding an exact hex hit is well under a usable
   // touch target. Take the nearest tray piece within a finger's radius — but never inside
@@ -998,11 +1045,13 @@ function onUp(e){
       if(!placeAt(idx, drag.pivotCell.q-co[0], drag.pivotCell.r-co[1])){
         const so=orientedOffsets(p)[drag.clickIdx];
         p.tray.x=drag.mx-axialToPixel(so[0],so[1],traySize).x; p.tray.y=drag.my-axialToPixel(so[0],so[1],traySize).y;
+        pushClearOfRing(p);
       }
     } else {
       const co=orientedOffsets(p)[drag.clickIdx];            // clicked hex, screen space
       const cp=axialToPixel(co[0],co[1],traySize);
       p.tray.x=drag.pivotPx.x-cp.x; p.tray.y=drag.pivotPx.y-cp.y;
+      pushClearOfRing(p);   // turning near the ring can swing part of the piece onto it
     }
   } else if(drag.snapCell && drag.valid){
     placeAt(idx, drag.snapCell.q, drag.snapCell.r);   // overlaps allowed; only off-board is refused
@@ -1014,6 +1063,7 @@ function onUp(e){
     p.placed=false; p.anchor=null;
     const co=orientedOffsets(p)[drag.clickIdx], cp=axialToPixel(co[0],co[1],traySize);
     p.tray.x=drag.mx-cp.x; p.tray.y=drag.my-cp.y;
+    pushClearOfRing(p);   // never leave it sitting on the board's turning ring
   }
   drag=null;
   recompute();
@@ -1067,6 +1117,9 @@ function reorient(i, deltaRot, doFlip){
     const m=meanPx(orientedOffsets(p),traySize);
     p.tray.x=oldCenPx.x-m.x; p.tray.y=oldCenPx.y-m.y;
   }
+  // a loose piece can swing onto the grip ring as it turns; a piece being dragged is exempt,
+  // since it is still under the finger and will be resolved when it is dropped
+  if(!p.placed && !(drag && drag.idx===i)) pushClearOfRing(p);
   if(drag && drag.idx===i) updateSnap();
   updateCount();
   draw();
