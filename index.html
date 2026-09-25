@@ -323,7 +323,7 @@ async function submitNameForApproval(id, code, name, layout){
     body: JSON.stringify({ id, code, name, layout, website: hp?hp.value:'' })
   });
   let body={}; try{ body=await res.json(); }catch(e){}
-  if(!res.ok || body.error) throw new Error(body.error || ('HTTP '+res.status));
+  if(!res.ok || body.error){ const e=new Error(body.error || ('HTTP '+res.status)); e.nameTaken=!!body.nameTaken; throw e; }
   return body;
 }
 
@@ -1496,7 +1496,8 @@ document.getElementById('submitName').onclick=async ()=>{
     input.disabled=true;
   }catch(err){
     btn.disabled=false; msg.className='';
-    msg.textContent='Couldn’t submit: '+(err.message||'please try again later')+'.';
+    if(err.nameTaken){ msg.textContent='⚠ '+err.message; input.focus(); if(input.select) input.select(); }
+    else msg.textContent='Couldn’t submit: '+(err.message||'please try again later')+'.';
   }
 };
 document.getElementById('nameInput').addEventListener('keydown',e=>{

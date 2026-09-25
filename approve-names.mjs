@@ -42,9 +42,11 @@ function checkGh() {
 const getIssue = n => ghJSON(['api', `repos/${OWNER}/${REPO}/issues/${n}`,
   '--jq', '{number, title, body, user: .user.login, url: .html_url}']);
 
+// List all open issues and filter to submissions client-side: the plain listing is fresher
+// than the label-filtered one, which lags for just-created issues.
 const listPending = () => ghJSON(['api',
-  `repos/${OWNER}/${REPO}/issues?labels=${SUB_LABEL}&state=open&per_page=100`,
-  '--jq', '[.[] | {number, title, body, user: .user.login, url: .html_url}]']);
+  `repos/${OWNER}/${REPO}/issues?state=open&per_page=100`,
+  '--jq', `[.[] | select(any(.labels[].name; . == "${SUB_LABEL}")) | {number, title, body, user: .user.login, url: .html_url}]`]);
 
 function parsePayload(body) {
   const m = (body || '').match(/```json\s*([\s\S]*?)```/);
@@ -52,7 +54,9 @@ function parsePayload(body) {
   try { return JSON.parse(m[1].trim()); } catch { return null; }
 }
 const b64 = s => Buffer.from(s, 'utf8').toString('base64');
-const fmt = n => (n == null ? '?' : Number(n).toLocaleString());
+// solution code shown to the player. The Worker sends p.code (e.g. "ABCD-EFGH-IJK");
+// very old issues sent p.num instead, so fall back to that.
+const codeStr = p => p.code || (p.num != null ? '#' + p.num : '(unknown)');
 
 function getApproved() {
   try {
@@ -82,10 +86,10 @@ function approve(issue) {
   if (!p || !p.id) { console.error(C.r(`  ✗ #${issue.number}: couldn't read submission data — skipped.`)); return false; }
   const { data, sha } = getApproved();
   const dup = data[p.id];
-  data[p.id] = { name: p.name, num: p.num, approvedAt: new Date().toISOString(), issue: issue.number };
-  putApproved(data, sha, `Approve name "${p.name}" for solution #${p.num}`);
+  data[p.id] = { name: p.name, code: p.code, approvedAt: new Date().toISOString(), issue: issue.number };
+  putApproved(data, sha, `Approve name "${p.name}" for solution ${codeStr(p)}`);
   closeIssue(issue.number, OK_LABEL);
-  console.log(C.g(`  ✓ approved “${p.name}” (solution #${fmt(p.num)})${dup ? ' (replaced an existing name)' : ''} — published.`));
+  console.log(C.g(`  ✓ approved “${p.name}” (solution ${codeStr(p)})${dup ? ' (replaced an existing name)' : ''} — published.`));
   return true;
 }
 function reject(issue) {
@@ -96,7 +100,7 @@ function reject(issue) {
 function show(issue) {
   const p = parsePayload(issue.body) || {};
   console.log(C.b(`#${issue.number}  “${p.name ?? issue.title}”`));
-  console.log(`   solution #${fmt(p.num)}   ${C.dim('by ' + issue.user)}`);
+  console.log(`   solution ${codeStr(p)}   ${C.dim('by ' + issue.user)}`);
   console.log(`   ${C.dim(issue.url)}`);
 }
 

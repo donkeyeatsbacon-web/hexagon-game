@@ -57,25 +57,47 @@ export default {
       'User-Agent': 'hexagon-name-worker',
     };
 
-    // 3.5) De-dupe: if this exact solution already has an OPEN (pending) submission, don't open
-    //      another — a name is already awaiting review for it. We list ALL open issues (that
-    //      listing is fresher than the label-filtered one, which lags for just-created issues)
-    //      and match on both the solution id in the body and the submission label. Fails open:
-    //      if the lookup errors, fall through and create the submission rather than lose it.
-    //      (Rejected/closed issues don't block a fresh attempt, since state=open.)
+    // List open issues once — used by both de-dupe checks below. This plain listing is fresher
+    // than the label-filtered one (which lags for just-created issues). If it errors, both
+    // checks fail open so a legitimate submission is never lost.
+    let openIssues = null;
     try {
-      const listUrl = `https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/issues?state=open&per_page=100`;
-      const lr = await fetch(listUrl, { headers: ghHeaders });
-      if (lr.ok) {
-        const open = await lr.json();
-        const needle = `"id":"${v.id}"`;   // the compact JSON block the Worker writes contains this
-        const dup = Array.isArray(open) && open.find(it =>
-          typeof it.body === 'string' && it.body.includes(needle) &&
-          Array.isArray(it.labels) && it.labels.some(l => (l && l.name || l) === label));
-        if (dup) return json({ ok: true, duplicate: true, issue: dup.number,
-          message: 'This solution already has a name awaiting review — thanks!' }, 200, cors);
+      const lr = await fetch(`https://api.github.com/repos/${env.GH_OWNER}/${env.GH_REPO}/issues?state=open&per_page=100`, { headers: ghHeaders });
+      if (lr.ok) openIssues = await lr.json();
+    } catch { /* leave null */ }
+    const isSubmission = it => Array.isArray(it.labels) && it.labels.some(l => (l && l.name || l) === label);
+
+    // 3.5) Same solution already has an OPEN (pending) submission → don't open another; a name
+    //      is already awaiting review for it. (Rejected/closed issues don't block a fresh try.)
+    if (Array.isArray(openIssues)) {
+      const dup = openIssues.find(it => typeof it.body === 'string' && it.body.includes(`"id":"${v.id}"`) && isSubmission(it));
+      if (dup) return json({ ok: true, duplicate: true, issue: dup.number,
+        message: 'This solution already has a name awaiting review — thanks!' }, 200, cors);
+    }
+
+    // 3.6) Names are unique. Reject if this exact name (trimmed, case-insensitive) is already used
+    //      by ANOTHER solution — approved, or pending in another open submission. Fails open.
+    try {
+      const wanted = normName(name);
+      const taken = new Set();
+      if (Array.isArray(openIssues)) {
+        for (const it of openIssues) {
+          if (!isSubmission(it) || typeof it.body !== 'string') continue;
+          if (it.body.includes(`"id":"${v.id}"`)) continue;      // this solution (ruled out above)
+          const pn = payloadName(it.body);
+          if (pn) taken.add(normName(pn));
+        }
       }
-    } catch { /* lookup failed → fail open and create the submission below */ }
+      // approved names live in the public approved-names.json (no token needed to read it)
+      const ar = await fetch(`https://raw.githubusercontent.com/${env.GH_OWNER}/${env.GH_REPO}/main/approved-names.json`, { cf: { cacheTtl: 30 } });
+      if (ar.ok) {
+        const approved = await ar.json().catch(() => ({}));
+        for (const [sid, rec] of Object.entries(approved || {})) {
+          if (sid !== v.id && rec && typeof rec.name === 'string') taken.add(normName(rec.name));
+        }
+      }
+      if (taken.has(wanted)) return json({ error: 'That name is already taken — please choose another.', nameTaken: true }, 409, cors);
+    } catch { /* uniqueness lookup failed → allow the submission */ }
 
     // 4) Create the GitHub issue server-side (token stays secret)
     const submission = { id: v.id, code: v.code, name, layout: data.layout };
@@ -119,6 +141,15 @@ function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), {
     status, headers: { 'Content-Type': 'application/json', ...cors },
   });
+}
+
+// name comparison key: trimmed, case-insensitive, inner whitespace collapsed
+function normName(s) { return String(s).trim().toLowerCase().replace(/\s+/g, ' '); }
+// pull the proposed name out of an issue body's ```json {...}``` block
+function payloadName(body) {
+  const m = body.match(/```json\s*([\s\S]*?)```/);
+  if (m) { try { const p = JSON.parse(m[1].trim()); if (p && typeof p.name === 'string') return p.name; } catch {} }
+  return null;
 }
 
 // same 53-bit hash the game uses — keep byte-for-byte identical
