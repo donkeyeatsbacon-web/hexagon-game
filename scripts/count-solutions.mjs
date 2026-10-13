@@ -10,7 +10,7 @@
  * PIECE_DATA and BOARD_RADIUS are parsed out of index.html rather than duplicated here, so
  * this can never quietly disagree with the game about what is being counted.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const PIECE_DATA = JSON.parse(html.match(/const PIECE_DATA = (\[.*?\]);/s)[1]);
@@ -143,6 +143,16 @@ function uncover(c) {
   R[L[c]] = c; L[R[c]] = c;
 }
 
+// --emit=N dumps the first N solutions as layouts (JSON on stdout) and stops. Used to give
+// the store screenshots real, visually distinct boards instead of repeating one fake entry.
+const emitArg = process.argv.find(a => a.startsWith('--emit='));
+const emitN = emitArg ? Number(emitArg.slice(7)) : 0;
+// Consecutive solutions differ by only a couple of pieces, so sampling them back to back
+// yields near-identical boards. A stride spaces them out across the search.
+const strideArg = process.argv.find(a => a.startsWith('--emit-stride='));
+const emitStride = strideArg ? Number(strideArg.slice(14)) : 1;
+const emitted = [];
+
 const wantOrbits = process.argv.includes('--orbits');
 const stack = new Int32Array(N_PIECES);
 let count = 0;
@@ -167,6 +177,25 @@ const t0 = process.hrtime.bigint();
 let nextReport = 100000;
 function recordSolution(depth) {
   count++;
+  if (emitN) {
+    if ((count - 1) % emitStride !== 0) return;
+    const layout = [];
+    for (let d = 0; d < depth; d++) {
+      const m = rowMeta[stack[d]];
+      layout.push({ id: PIECE_DATA[m.piece].id, color: PIECE_DATA[m.piece].color,
+                    cells: m.cells.map(i => boardCells[i]) });
+    }
+    layout.sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
+    emitted.push(layout);
+    if (emitted.length >= emitN) {
+      // to a file, not stdout: the progress lines above would otherwise be mixed into the JSON
+      const dest = (process.argv.find(a => a.startsWith('--emit-to=')) || '--emit-to=solutions.json').slice(10);
+      writeFileSync(dest, JSON.stringify(emitted));
+      console.log(`wrote ${emitted.length} solutions to ${dest}`);
+      process.exit(0);
+    }
+    return;
+  }
   if (count >= nextReport) {
     const s = Number(process.hrtime.bigint() - t0) / 1e9;
     process.stdout.write(`  ${count.toLocaleString()} solutions  ${s.toFixed(0)}s  (${Math.round(count / s).toLocaleString()}/s)\n`);

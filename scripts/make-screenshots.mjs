@@ -10,7 +10,7 @@
  * layout the size of a real phone AND a crisp backing store, so 430x932 @3x lands exactly on
  * 1290x2796 with no resampling. Upscaling a 430px capture would look soft.
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -46,15 +46,18 @@ const SCENES = {
     startTime = Date.now() - 168000;          // a plausible 02:48
     solveAll(); checkWin();
   },
-  // The collection gallery, populated with a few finds.
-  collection: () => {
+  // The collection gallery, populated with four real solutions taken from the exhaustive
+  // search (store-assets/sample-solutions.json, produced by count-solutions.mjs --emit).
+  // Invented ids would render as nonsense codes, and reusing one layout four times would
+  // show four identical boards -- neither is what a player's collection looks like.
+  collection: (samples) => {
     localStorage.clear();
     makePieces(); newGame(true); resize();
-    solveAll();
-    const layout = currentLayout();
     const col = {};
-    [[41207, 6], [318664, 21], [502931, 44], [709155, 73]].forEach(([num, daysAgo], i) => {
-      col['demo' + i] = { num, date: 1757000000000 - daysAgo * 86400000, layout };
+    const ages = [6, 21, 44, 73];
+    samples.forEach((layout, i) => {
+      col[canonicalIdFromLayout(layout)] =
+        { date: 1757000000000 - ages[i] * 86400000, layout };
     });
     saveCollection(col);
     solvedFlag = false;
@@ -70,6 +73,7 @@ const SCENES = {
 };
 
 mkdirSync(OUT, { recursive: true });
+const SAMPLES = JSON.parse(readFileSync(new URL('../store-assets/sample-solutions.json', import.meta.url), 'utf8'));
 const browser = await chromium.launch();
 
 for (const d of DEVICES) {
@@ -90,7 +94,7 @@ for (const d of DEVICES) {
     // global *lexical* binding rather than a property on window. Unqualified access resolves
     // through the scope chain; window.pieces would be undefined forever.
     await page.waitForFunction(() => typeof pieces !== 'undefined' && pieces.length > 0);
-    await page.evaluate(scene);
+    await page.evaluate(scene, name === 'collection' ? SAMPLES : undefined);
     await page.waitForTimeout(350);           // let the overlap flash / layout settle
 
     // Assert the scene is actually what it claims. Checking game state alone is not enough:
