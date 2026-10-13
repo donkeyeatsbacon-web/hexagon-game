@@ -26,6 +26,11 @@
     padding:7px 12px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;
     transition:background .15s,border-color .15s;user-select:none;white-space:nowrap;}
   .btn:hover{background:#333844;border-color:#4a505e;}
+  /* a focus ring that is actually visible against the dark panels */
+  .btn:focus-visible,#c:focus-visible,input:focus-visible,a:focus-visible{
+    outline:3px solid var(--accent);outline-offset:2px;}
+  .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
   .btn:active{transform:translateY(1px);}
   .btn.primary{background:var(--accent);color:#20160a;border-color:var(--accent);}
   .btn.primary:hover{background:#ffb733;}
@@ -174,18 +179,20 @@
     <h1>⬡<span class="lbl"> Hexagon Puzzle</span></h1>
     <span class="sub">fit every piece into the hexagon</span>
     <span class="spacer"></span>
-    <span class="pill">Placed <b id="count">0</b>/<b id="total">0</b></span>
-    <button class="btn" id="rotL" title="Rotate left">⟲</button>
-    <button class="btn" id="rotR" title="Rotate right">⟳</button>
-    <button class="btn" id="flip" title="Flip selected piece">⇋ Flip</button>
-    <button class="btn" id="shuffle">Shuffle</button>
+    <span class="pill" role="status" aria-live="polite">Placed <b id="count">0</b>/<b id="total">0</b></span>
+    <button class="btn" id="rotL" title="Rotate left" aria-label="Rotate selected piece left">⟲</button>
+    <button class="btn" id="rotR" title="Rotate right" aria-label="Rotate selected piece right">⟳</button>
+    <button class="btn" id="flip" title="Flip selected piece" aria-label="Flip selected piece">⇋ Flip</button>
+    <button class="btn" id="shuffle" aria-label="Shuffle: clear the board and re-scatter the pieces">Shuffle</button>
     <button class="btn" id="reset">Reset</button>
-    <button class="btn" id="sound" title="Sound on" aria-pressed="true">🔊</button>
-    <button class="btn" id="help" title="How to play">?</button>
-    <button class="btn" id="solutions">🏅 <span class="lbl">My Solutions </span>(<b id="solCount">0</b>)</button>
+    <button class="btn" id="sound" title="Sound on" aria-label="Sound" aria-pressed="true">🔊</button>
+    <button class="btn" id="help" title="How to play" aria-label="How to play">?</button>
+    <button class="btn" id="solutions" aria-label="My solutions">🏅 <span class="lbl">My Solutions </span>(<b id="solCount">0</b>)</button>
   </header>
   <div id="stage">
-    <canvas id="c"></canvas>
+    <canvas id="c" tabindex="0" role="application"
+      aria-label="Hexagon puzzle board. Press N for the next piece, arrow keys to move it, R and E to rotate, F to flip, Enter to place, Backspace to take it off the board."></canvas>
+    <p id="srStatus" class="sr-only" role="status" aria-live="polite"></p>
     <div class="hint">
       <span><kbd>drag</kbd> move piece</span>
       <span><kbd>tap</kbd> / <kbd>R</kbd> rotate</span>
@@ -193,8 +200,8 @@
       <span><kbd>drag ring</kbd> turn board</span>
       <span>bad cells flash <span style="color:#ffffff">white</span></span>
     </div>
-    <div id="win"><div class="card">
-      <h2>🎉 Solved!</h2>
+    <div id="win" role="dialog" aria-modal="true" aria-labelledby="winTitle"><div class="card">
+      <h2 id="winTitle">🎉 Solved!</h2>
       <div class="badge" id="badge"></div>
       <div id="nameBox">
         <div id="approvedName"></div>
@@ -212,17 +219,17 @@
       <button class="btn primary" id="again">Play again</button>
       <button class="btn" id="viewAll">View my solutions</button>
     </div></div>
-    <div id="collection">
+    <div id="collection" role="dialog" aria-modal="true" aria-labelledby="colTitle">
       <div class="top">
-        <h2>🏅 My Solutions</h2>
+        <h2 id="colTitle">🏅 My Solutions</h2>
         <span class="sub" id="colSub"></span>
         <span class="spacer" style="flex:1"></span>
         <button class="btn" id="colClose">Close</button>
       </div>
       <div id="gallery"></div>
     </div>
-    <div id="tut"><div class="card">
-      <h2>⬡ How to play</h2>
+    <div id="tut" role="dialog" aria-modal="true" aria-labelledby="tutTitle"><div class="card">
+      <h2 id="tutTitle">⬡ How to play</h2>
       <p class="lead">Fit all <b id="tutCount">14</b> pieces into the hexagon — every cell filled,
         nothing overlapping.</p>
       <ul>
@@ -234,6 +241,9 @@
           <span class="tx">Opens a menu to rotate either way, or flip the piece over.</span></div></li>
         <li><span class="ico">◎</span><div><b>Drag the outer ring</b>
           <span class="tx">Turns the whole board in 60° steps, pieces and all.</span></div></li>
+        <li><span class="ico">⌨</span><div><b>Playing by keyboard</b>
+          <span class="tx"><b>N</b> next piece, <b>arrows</b> move it, <b>R</b>/<b>E</b> rotate,
+          <b>F</b> flip, <b>Backspace</b> takes it off the board.</span></div></li>
         <li><span class="ico">⚪</span><div><b>White flashing cells</b>
           <span class="tx">Two pieces overlap there, or a piece hangs off the board — move it.</span></div></li>
       </ul>
@@ -242,10 +252,10 @@
            navigating the WebView off the game with no way back -->
       <p class="legal"><a id="privacyLink" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
     </div></div>
-    <div id="approved">
+    <div id="approved" role="dialog" aria-modal="true" aria-labelledby="approvedTitle">
       <canvas id="fireworks"></canvas>
       <div class="card">
-        <h2>🎉 Your solution name was approved!</h2>
+        <h2 id="approvedTitle">🎉 Your solution name was approved!</h2>
         <div id="approvedList"></div>
         <p class="sub">It now shows to every player who finds that solution.</p>
         <button class="btn primary" id="approvedClose">OK</button>
@@ -762,11 +772,19 @@ function stopFlash(){ if(flashRAF!=null){ cancelAnimationFrame(flashRAF); flashR
 const overlayStack=[];
 let popping=false;      // true while we're closing in response to a popstate
 let expectedPops=0;     // history.back() calls we made ourselves, to ignore when they echo
+// Where focus was before a dialog opened, so it can be handed back on close.
+const overlayReturn={};
+const FIRST_FOCUS={win:'nameInput', collection:'colClose', tut:'tutClose', approved:'approvedClose'};
 function openOverlay(id){
   if(overlayStack.includes(id)) return;
+  overlayReturn[id]=document.activeElement;
   document.getElementById(id).style.display='flex';
   overlayStack.push(id);
   history.pushState({ov:id}, '');
+  // Move focus into the dialog, otherwise it stays on the board behind and a keyboard or
+  // screen-reader user is left tabbing through content they cannot see.
+  const first=document.getElementById(FIRST_FOCUS[id]);
+  if(first && first.offsetParent!==null){ try{ first.focus(); }catch(e){} }
 }
 function closeOverlay(id){
   document.getElementById(id).style.display='none';
@@ -776,6 +794,11 @@ function closeOverlay(id){
   const i=overlayStack.lastIndexOf(id);
   if(i<0) return;                      // never opened through the stack (e.g. boot-time reset)
   overlayStack.splice(i,1);
+  // Hand focus back only for a dialog that was genuinely open. newGame() closes the win card
+  // unconditionally, and doing this before the check meant pressing Shuffle stole focus.
+  const back=overlayReturn[id]; delete overlayReturn[id];
+  if(back && document.contains(back) && back.offsetParent!==null){ try{ back.focus(); }catch(e){} }
+  else { try{ document.getElementById('c').focus(); }catch(e){} }
   if(!popping){ expectedPops++; history.back(); }   // drop the entry this overlay pushed
 }
 window.addEventListener('popstate',()=>{
@@ -1527,10 +1550,102 @@ document.getElementById('nameInput').addEventListener('keydown',e=>{
   if(e.key==='Enter'){ e.preventDefault(); document.getElementById('submitName').click(); }
 });
 
+/* ---------- keyboard play ----------
+   The board is a canvas, so without this the game needs a pointer and is invisible to a
+   screen reader. N/P walk the pieces, the arrows move the selected one a cell at a time,
+   and every change is described in #srStatus for anyone who cannot see the board.
+
+   The arrows used to rotate. They now move, which is what an arrow key is expected to do in
+   a puzzle; R and E still rotate, as the on-screen hint has always said. */
+const srStatus=document.getElementById('srStatus');
+function announce(msg){ if(srStatus) srStatus.textContent=msg; }
+
+function pieceLabel(i){
+  const p=pieces[i];
+  return 'piece '+(i+1)+' of '+pieces.length+', '+p.base.length+' cells';
+}
+function describePlacement(i){
+  const p=pieces[i];
+  if(!p.placed) return pieceLabel(i)+', off the board';
+  const bad=placedCells(p).filter(c=>!boardSet.has(c[0]+','+c[1])).length;
+  const clash=placedCells(p).some(c=>overlapCells.has(c[0]+','+c[1]));
+  let st=pieceLabel(i)+', at column '+p.anchor.q+' row '+p.anchor.r;
+  if(bad) st+=', '+bad+' cell'+(bad>1?'s':'')+' off the board';
+  if(clash) st+=', overlapping another piece';
+  if(!bad && !clash) st+=', placed cleanly';
+  const n=pieces.filter(x=>x.placed).length;
+  return st+'. '+n+' of '+pieces.length+' placed.';
+}
+function selectPiece(i){
+  if(!pieces.length) return;
+  selected=((i%pieces.length)+pieces.length)%pieces.length;
+  draw();
+  announce(describePlacement(selected));
+}
+function stepSelection(d){
+  selectPiece(selected<0 ? (d>0?0:pieces.length-1) : selected+d);
+}
+// Arrow directions on a pointy-top hex grid. Up/Down are the two near-vertical neighbours;
+// every cell is reachable by combining them with left/right.
+const KEY_DIRS={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+function nudgeSelected(dq,dr){
+  if(selected<0){ announce('No piece selected. Press N to choose one.'); return; }
+  const p=pieces[selected];
+  if(!p.placed){
+    // first arrow press brings a loose piece onto the board, near the middle
+    p.placedK=boardSteps();
+    if(!placeAt(selected,0,0)) { announce('Could not place that piece.'); return; }
+  } else {
+    placeAt(selected, p.anchor.q+dq, p.anchor.r+dr);
+  }
+  updateCount(); draw(); saveProgress();
+  announce(describePlacement(selected));
+  checkWin();
+}
+function returnSelectedToTray(){
+  if(selected<0 || !pieces[selected].placed){ announce('That piece is already off the board.'); return; }
+  const p=pieces[selected];
+  p.rot=((p.rot-(p.placedK||0)+boardSteps())%6+6)%6; p.placedK=0;
+  removeFromBoard(selected);
+  pushClearOfRing(p);
+  updateCount(); draw(); saveProgress();
+  announce(pieceLabel(selected)+' taken off the board. '+pieces.filter(x=>x.placed).length+' of '+pieces.length+' placed.');
+}
 window.addEventListener('keydown',e=>{
-  if(e.key==='r'||e.key==='R'||e.key==='ArrowRight') { rotateActive(1); }
-  else if(e.key==='e'||e.key==='E'||e.key==='ArrowLeft'){ rotateActive(-1); }
-  else if(e.key==='f'||e.key==='F'){ flipActive(); }
+  // never hijack typing in the name field, and leave modifier combos to the browser
+  const t=e.target;
+  if(t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+
+  // Escape closes the top overlay, except the approval card, which is acknowledged by its
+  // button; the tutorial is also dismissed as "seen" so it does not reappear every launch.
+  if(e.key==='Escape'){
+    const top=overlayStack[overlayStack.length-1];
+    if(top && top!=='approved'){
+      if(top==='tut'){ try{ localStorage.setItem(TUT_KEY,'1'); }catch(err){} }
+      closeOverlay(top); e.preventDefault();
+    } else if(selected>=0){ selected=-1; draw(); announce('Selection cleared.'); }
+    return;
+  }
+  if(overlayStack.length) return;          // a dialog is open: leave the board alone
+
+  const k=e.key;
+  // Enter and Space are how a focused button is activated. Swallowing them here made every
+  // header control dead to the keyboard. The movement and rotation keys are still handled
+  // wherever focus happens to be, so they keep working after a button has been clicked.
+  const onControl = e.target && ['BUTTON','A','SELECT'].includes(e.target.tagName);
+  if(onControl && (k==='Enter'||k===' ')) return;
+  if(k==='r'||k==='R'){ rotateActive(1); announce('Rotated right. '+describePlacement(activeIdx())); e.preventDefault(); }
+  else if(k==='e'||k==='E'){ rotateActive(-1); announce('Rotated left. '+describePlacement(activeIdx())); e.preventDefault(); }
+  else if(k==='f'||k==='F'){ flipActive(); announce('Flipped. '+describePlacement(activeIdx())); e.preventDefault(); }
+  else if(k==='n'||k==='N'){ stepSelection(1); e.preventDefault(); }
+  else if(k==='p'||k==='P'){ stepSelection(-1); e.preventDefault(); }
+  else if(KEY_DIRS[k]){ nudgeSelected(...KEY_DIRS[k]); e.preventDefault(); }
+  else if(k==='Enter'||k===' '){
+    if(selected<0){ stepSelection(1); } else { nudgeSelected(0,0); }
+    e.preventDefault();
+  }
+  else if(k==='Backspace'||k==='Delete'){ returnSelectedToTray(); e.preventDefault(); }
 });
 canvas.addEventListener('mousedown',onDown);
 window.addEventListener('mousemove',onMove);
