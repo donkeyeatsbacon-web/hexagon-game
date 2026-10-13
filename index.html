@@ -291,7 +291,16 @@ async function loadApprovedNames(){
    ours. Matching on the name matters — another player may have named the same solution first,
    in which case the entry exists but is not ours to celebrate. */
 const PENDING_NAMES_KEY='hexPendingNamesV1';
-function loadPendingNames(){ try{ return JSON.parse(localStorage.getItem(PENDING_NAMES_KEY)||'{}'); }catch(e){ return {}; } }
+/* JSON.parse('null') returns null rather than throwing, and an array is also typeof
+   'object', so a storage value that is not a plain object sailed past the try/catch and blew
+   up later at Object.keys/entries — taking the whole page down on load. */
+function parseStoredObject(raw){
+  try{
+    const v=JSON.parse(raw||'{}');
+    return (v && typeof v==='object' && !Array.isArray(v)) ? v : {};
+  }catch(e){ return {}; }
+}
+function loadPendingNames(){ return parseStoredObject(localStorage.getItem(PENDING_NAMES_KEY)); }
 function savePendingNames(p){ try{ localStorage.setItem(PENDING_NAMES_KEY, JSON.stringify(p)); }catch(e){} }
 function rememberSubmission(id, name){
   const p=loadPendingNames();
@@ -1221,8 +1230,8 @@ function currentLayout(){ return pieces.map(p=>({id:p.id, color:p.color, cells:p
 function loadCollection(){
   try{
     const v2=localStorage.getItem('hexSolvedV2');
-    if(v2) return JSON.parse(v2);
-    const old=JSON.parse(localStorage.getItem('hexSolvedV1')||'{}');
+    if(v2) return parseStoredObject(v2);
+    const old=parseStoredObject(localStorage.getItem('hexSolvedV1'));
     const out={};
     for(const [id,rec] of Object.entries(old)){
       const key=(rec && Array.isArray(rec.layout)) ? canonicalIdFromLayout(rec.layout) : id;
@@ -1345,13 +1354,21 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>(
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* render one saved solution as a mini hexagon */
+// Tolerates a malformed layout rather than throwing: one corrupt entry used to abort the
+// gallery render before the overlay opened, which left "My Solutions" a dead button for good.
 function drawSolMini(canvas, layout){
   const R=9, pad=3;
   let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9; const cells=[];
-  layout.forEach(pc=>pc.cells.forEach(([q,r])=>{
-    const x=R*SQRT3*(q+r/2), y=R*1.5*r; cells.push({x,y,color:pc.color});
-    minx=Math.min(minx,x-R);maxx=Math.max(maxx,x+R);miny=Math.min(miny,y-R);maxy=Math.max(maxy,y+R);
-  }));
+  (Array.isArray(layout)?layout:[]).forEach(pc=>{
+    if(!pc || !Array.isArray(pc.cells)) return;
+    pc.cells.forEach(c=>{
+      if(!Array.isArray(c) || c.length!==2) return;
+      const q=c[0], r=c[1];
+      const x=R*SQRT3*(q+r/2), y=R*1.5*r; cells.push({x,y,color:pc.color});
+      minx=Math.min(minx,x-R);maxx=Math.max(maxx,x+R);miny=Math.min(miny,y-R);maxy=Math.max(maxy,y+R);
+    });
+  });
+  if(!cells.length){ canvas.width=1; canvas.height=1; return; }
   const w=Math.ceil(maxx-minx)+pad*2, hh=Math.ceil(maxy-miny)+pad*2;
   const DPR=Math.min(window.devicePixelRatio||1,2);
   // Only the backing store is sized here — no inline CSS width/height. `.sol canvas` then
@@ -1419,13 +1436,18 @@ function namingStatus(id, rec, approvedName, pendingEntry){
 async function openCollection(){
   await loadApprovedNames();            // pull the latest approved names before rendering
   const col=loadCollection();
-  const entries=Object.entries(col).sort((a,b)=>b[1].date-a[1].date);
+  // Entries without a usable layout cannot be drawn, so they are not claimed in the count.
+  const entries=Object.entries(col)
+    .filter(([,rec])=>rec && Array.isArray(rec.layout) && rec.layout.length)
+    .sort((a,b)=>b[1].date-a[1].date);
   document.getElementById('colSub').textContent=
     entries.length+(entries.length===1?' solution collected':' solutions collected');
   const g=document.getElementById('gallery'); g.innerHTML='';
   if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
   const pending=loadPendingNames();
   entries.forEach(([id,rec])=>{
+    // Never let one unreadable entry stop the rest of the gallery, or the overlay, appearing.
+    try{
     const name=(approvedNames[id] && approvedNames[id].name) || rec.name;
     const d=document.createElement('div'); d.className='sol';
     const cv=document.createElement('canvas'); d.appendChild(cv);
@@ -1437,6 +1459,7 @@ async function openCollection(){
     // which are still with the reviewer, and which they could still claim a name for.
     d.appendChild(namingStatus(id, rec, name, pending[id]));
     g.appendChild(d); drawSolMini(cv, rec.layout);
+    }catch(e){ /* skip this one; a corrupt record should cost one tile, not the screen */ }
   });
   openOverlay('collection');
 }
