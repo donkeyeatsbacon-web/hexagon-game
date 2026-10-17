@@ -17,12 +17,14 @@ Hexagon Puzzle
 
 **Short description** (max 80)
 ```
-Fit fourteen coloured pieces into one hexagon. Easy to learn, hard to put down.
+Fit the coloured pieces into the hexagon. Two boards, easy to learn.
 ```
 
 **Full description** (max 4000)
 ```
 Fourteen coloured pieces. One hexagonal board. Every cell must be filled, and nothing may overlap.
+
+Or take the smaller board: nine pieces, a quicker puzzle, and a collection of its own.
 
 That is the whole game. There is no timer pressure, no lives, no energy meter and no ads — just a shape that has to come out exactly right.
 
@@ -41,6 +43,10 @@ BUILT FOR TOUCH
 • Press and hold for rotate and flip
 • Turn the whole board with the outer ring to see the puzzle from a new angle
 • Overlapping pieces flash red, so a mistake is never hidden
+
+TWO BOARDS
+
+Classic is fourteen pieces across sixty-one cells. Small is nine pieces across thirty-seven — faster to finish, and a gentler place to learn the controls. Each board remembers its own unfinished game and keeps its own collection of solutions.
 
 PLAYS ANYWHERE
 

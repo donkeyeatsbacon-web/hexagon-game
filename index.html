@@ -155,6 +155,10 @@
   .boardOpt b{display:block;font-size:15px;}
   .boardOpt span{display:block;color:var(--muted);font-size:11.5px;margin-top:3px;}
   .boardOpt .cur{color:var(--accent);font-weight:700;}
+  #tut .boards-tip{margin:0 0 16px;padding:10px 12px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;color:var(--muted);
+    font-size:12.5px;line-height:1.45;}
+  #tut .boards-tip b{color:var(--accent);}
   #tut .legal{margin:12px 0 0;text-align:center;font-size:11.5px;}
   #tut .legal a{color:var(--muted);}
   /* name-approved celebration — above every other overlay, dismissed only by its button */
@@ -266,6 +270,8 @@
         <li><span class="ico">⚪</span><div><b>White flashing cells</b>
           <span class="tx">Two pieces overlap there, or a piece hangs off the board — move it.</span></div></li>
       </ul>
+      <p class="boards-tip">Two boards to play: tap <b>⬡ Classic</b> in the toolbar to switch.
+        Each keeps its own game and its own collection.</p>
       <button class="btn primary" id="tutClose">Got it</button>
       <!-- target=_blank so the packaged app hands this to the system browser instead of
            navigating the WebView off the game with no way back -->
@@ -1850,7 +1856,12 @@ document.getElementById('approvedClose').onclick=()=>closeOverlay('approved');
 
 /* ---------- first-run tutorial ---------- */
 const TUT_KEY='hexTutorialV1';
-function showTutorial(){ openOverlay('tut'); }
+function showTutorial(){
+  // the count follows the board you are on, not whichever one happened to load first
+  const n=document.getElementById('tutCount');
+  if(n) n.textContent=pieces.length;
+  openOverlay('tut');
+}
 document.getElementById('tutClose').onclick=()=>{
   closeOverlay('tut');
   try{ localStorage.setItem(TUT_KEY,'1'); }catch(e){}

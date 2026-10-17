@@ -64,6 +64,29 @@ const SCENES = {
     closeOverlay('win');
     openCollection();
   },
+  // The second board mid-play, and the picker that reaches it. Both are new in this
+  // release and invisible in a classic-only set of screenshots.
+  small: () => {
+    localStorage.clear();
+    setBoard('small');
+    makePieces(); newGame(true); resize();
+    const place = [[0, 0, 0], [1, -2, 0], [2, 2, -2]];
+    for (const [i, q, r] of place) { pieces[i].rot = 0; pieces[i].flip = false; placeAt(i, q, r); }
+    updateCount(); draw();
+  },
+  boards: (samples) => {
+    localStorage.clear();
+    makePieces(); newGame(true); resize();
+    // Seed a few real finds so the picker shows what it looks like in use rather than
+    // "none found yet" twice, which is only ever true for about one minute.
+    const col = {};
+    samples.forEach((layout, i) => { col['seed' + i] = { date: 1757000000000 - i * 9e7, layout }; });
+    try { localStorage.setItem('hexSolvedV2:classic', JSON.stringify(col)); } catch (e) {}
+    openBoards();
+    // openOverlay focuses the first control; a focus ring on Close reads as a highlight
+    // in a still image, so drop it for the capture.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  },
   // The first-run tutorial.
   tutorial: () => {
     localStorage.clear();
@@ -94,7 +117,7 @@ for (const d of DEVICES) {
     // global *lexical* binding rather than a property on window. Unqualified access resolves
     // through the scope chain; window.pieces would be undefined forever.
     await page.waitForFunction(() => typeof pieces !== 'undefined' && pieces.length > 0);
-    await page.evaluate(scene, name === 'collection' ? SAMPLES : undefined);
+    await page.evaluate(scene, (name === 'collection' || name === 'boards') ? SAMPLES : undefined);
     await page.waitForTimeout(350);           // let the overlap flash / layout settle
 
     // Assert the scene is actually what it claims. Checking game state alone is not enough:
@@ -103,12 +126,16 @@ for (const d of DEVICES) {
       tut: getComputedStyle(document.getElementById('tut')).display !== 'none',
       win: getComputedStyle(document.getElementById('win')).display !== 'none',
       col: getComputedStyle(document.getElementById('collection')).display !== 'none',
+      brd: getComputedStyle(document.getElementById('boards')).display !== 'none',
+      onSmall: BOARD.id === 'small',
     }));
     const want = {
-      board:      { tut: false, win: false, col: false },
-      solved:     { tut: false, win: true,  col: false },
-      collection: { tut: false, win: false, col: true },
-      tutorial:   { tut: true,  win: false, col: false },
+      board:      { tut: false, win: false, col: false, brd: false, onSmall: false },
+      solved:     { tut: false, win: true,  col: false, brd: false, onSmall: false },
+      collection: { tut: false, win: false, col: true,  brd: false, onSmall: false },
+      tutorial:   { tut: true,  win: false, col: false, brd: false, onSmall: false },
+      small:      { tut: false, win: false, col: false, brd: false, onSmall: true  },
+      boards:     { tut: false, win: false, col: false, brd: true,  onSmall: false },
     }[name];
     for (const k of Object.keys(want)) {
       if (shown[k] !== want[k]) {
