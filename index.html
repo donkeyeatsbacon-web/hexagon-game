@@ -137,6 +137,24 @@
   #tut li b{color:var(--ink);display:block;font-size:13.5px;}
   #tut li span.tx{color:var(--muted);font-size:12.5px;line-height:1.4;}
   #tut .btn{width:100%;padding:11px;font-size:14px;}
+  #boards{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:7;
+    background:rgba(12,14,18,.92);backdrop-filter:blur(4px);
+    padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+            calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));}
+  #boards .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:22px;max-width:380px;width:100%;max-height:100%;overflow-y:auto;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  #boards h2{margin:0 0 4px;font-size:20px;}
+  #boards .lead{margin:0 0 14px;color:var(--muted);font-size:12.5px;}
+  #boards .btn{width:100%;}
+  .boardOpt{display:block;width:100%;text-align:left;background:var(--panel2);color:var(--ink);
+    border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;
+    cursor:pointer;font-family:inherit;font-size:13.5px;}
+  .boardOpt:hover{border-color:#4a505e;}
+  .boardOpt[aria-current="true"]{border-color:var(--accent);}
+  .boardOpt b{display:block;font-size:15px;}
+  .boardOpt span{display:block;color:var(--muted);font-size:11.5px;margin-top:3px;}
+  .boardOpt .cur{color:var(--accent);font-weight:700;}
   #tut .legal{margin:12px 0 0;text-align:center;font-size:11.5px;}
   #tut .legal a{color:var(--muted);}
   /* name-approved celebration — above every other overlay, dismissed only by its button */
@@ -253,6 +271,12 @@
            navigating the WebView off the game with no way back -->
       <p class="legal"><a id="privacyLink" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
     </div></div>
+    <div id="boards" role="dialog" aria-modal="true" aria-labelledby="boardsTitle"><div class="card">
+      <h2 id="boardsTitle">⬡ Choose a board</h2>
+      <p class="lead">Each board keeps its own game and its own collection.</p>
+      <div id="boardList"></div>
+      <button class="btn" id="boardsClose">Close</button>
+    </div></div>
     <div id="approved" role="dialog" aria-modal="true" aria-labelledby="approvedTitle">
       <canvas id="fireworks"></canvas>
       <div class="card">
@@ -350,12 +374,12 @@ function collectApprovedSubmissions(){
   return mine;
 }
 // POST the submission to the Worker (no GitHub login needed). Resolves on success, throws on error.
-async function submitNameForApproval(id, code, name, layout){
+async function submitNameForApproval(id, code, name, layout, boardId){
   const hp=document.getElementById('hpWebsite');
   const res = await fetch(WORKER_URL, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ id, code, name, layout, website: hp?hp.value:'' })
+    body: JSON.stringify({ id, code, board: boardId||BOARD.id, name, layout, website: hp?hp.value:'' })
   });
   let body={}; try{ body=await res.json(); }catch(e){}
   if(!res.ok || body.error){ const e=new Error(body.error || ('HTTP '+res.status)); e.nameTaken=!!body.nameTaken; throw e; }
@@ -796,7 +820,7 @@ let popping=false;      // true while we're closing in response to a popstate
 let expectedPops=0;     // history.back() calls we made ourselves, to ignore when they echo
 // Where focus was before a dialog opened, so it can be handed back on close.
 const overlayReturn={};
-const FIRST_FOCUS={win:'nameInput', collection:'colClose', tut:'tutClose', approved:'approvedClose'};
+const FIRST_FOCUS={win:'nameInput', collection:'colClose', tut:'tutClose', approved:'approvedClose', boards:'boardsClose'};
 function openOverlay(id){
   if(overlayStack.includes(id)) return;
   overlayReturn[id]=document.activeElement;
@@ -1507,7 +1531,7 @@ async function openCollection(){
     .filter(([,rec])=>rec && Array.isArray(rec.layout) && rec.layout.length)
     .sort((a,b)=>b[1].date-a[1].date);
   document.getElementById('colSub').textContent=
-    entries.length+(entries.length===1?' solution collected':' solutions collected');
+    BOARD.name+' · '+entries.length+(entries.length===1?' solution collected':' solutions collected');
   const g=document.getElementById('gallery'); g.innerHTML='';
   if(!entries.length){ g.innerHTML='<div class="empty">No solutions yet — solve the puzzle to start your collection!</div>'; }
   const pending=loadPendingNames();
@@ -1587,10 +1611,35 @@ document.getElementById('rotL').onclick=()=>rotateActive(-1);
 document.getElementById('rotR').onclick=()=>rotateActive(1);
 document.getElementById('flip').onclick=()=>flipActive();
 document.getElementById('shuffle').onclick=()=>newGame(true);
-document.getElementById('board').onclick=()=>{
-  const ids=Object.keys(BOARDS);
-  setBoard(ids[(ids.indexOf(BOARD.id)+1)%ids.length]);   // cycle; a picker can come later
-};
+/* The picker reads each board's own collection so you can see what you have everywhere,
+   not just on the board you happen to be looking at. */
+function openBoards(){
+  const list=document.getElementById('boardList');
+  list.innerHTML='';
+  for(const def of Object.values(BOARDS)){
+    let found=0;
+    try{ found=Object.keys(parseStoredObject(localStorage.getItem('hexSolvedV2:'+def.id))).length; }catch(e){}
+    if(!found && def.id===DEFAULT_BOARD){            // pre-boards collection belongs to classic
+      try{ found=Object.keys(parseStoredObject(localStorage.getItem('hexSolvedV2'))).length; }catch(e){}
+    }
+    const cells=3*def.radius*(def.radius+1)+1;
+    const b=document.createElement('button');
+    b.className='boardOpt'; b.type='button';
+    if(def.id===BOARD.id) b.setAttribute('aria-current','true');
+    const t=document.createElement('b'); t.textContent=def.name; b.appendChild(t);
+    const d=document.createElement('span');
+    d.textContent=def.pieces.length+' pieces · '+cells+' cells · '
+      +(found?found+(found===1?' solution found':' solutions found'):'none found yet');
+    b.appendChild(d);
+    if(def.id===BOARD.id){ const c=document.createElement('span'); c.className='cur';
+      c.textContent='Currently playing'; b.appendChild(c); }
+    b.onclick=()=>{ closeOverlay('boards'); if(def.id!==BOARD.id) setBoard(def.id); };
+    list.appendChild(b);
+  }
+  openOverlay('boards');
+}
+document.getElementById('board').onclick=openBoards;
+document.getElementById('boardsClose').onclick=()=>closeOverlay('boards');
 document.getElementById('reset').onclick=()=>newGame(true);
 document.getElementById('again').onclick=()=>newGame(true);
 document.getElementById('solutions').onclick=openCollection;

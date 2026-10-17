@@ -15,7 +15,15 @@
  *   RL                 (binding) Cloudflare Rate Limiting — hard per-IP cap (optional)
  */
 
-const BOARD_RADIUS = 4;
+/* The boards the game offers. Must mirror BOARDS in index.html —
+   scripts/check-worker-pieces.mjs asserts they agree. */
+const BOARDS = {
+  classic: { id: 'classic', radius: 4,
+             pieces: ['P0','P1','P2','P3','P4','P5','P6','P7','P8','P9','P10','P11','P12','P13'] },
+  small:   { id: 'small',   radius: 3,
+             pieces: ['P2','P3','P4','P5','P6','P7','P9','P10','P13'] },
+};
+const DEFAULT_BOARD = 'classic';
 
 export default {
   async fetch(request, env) {
@@ -100,12 +108,13 @@ export default {
     } catch { /* uniqueness lookup failed → allow the submission */ }
 
     // 4) Create the GitHub issue server-side (token stays secret)
-    const submission = { id: v.id, code: v.code, name, layout: data.layout };
+    const submission = { id: v.id, code: v.code, board: v.board, name, layout: data.layout };
     const title = `Name ${v.code}: ${name}`;
+    const boardNote = v.board === DEFAULT_BOARD ? '' : ` (${v.board} board)`;
     const body =
       'A player proposed a name for a hexagon solution — approve it in the admin page.\n\n' +
       `**Name:** ${name}\n` +
-      `**Solution:** ${v.code} (\`${v.id}\`)\n\n` +
+      `**Solution:** ${v.code}${boardNote} (\`${v.id}\`)\n\n` +
       '```json\n' + JSON.stringify(submission) + '\n```\n';
 
     let gh;
@@ -182,7 +191,7 @@ function symmetries(cells) {
   }
   return out;
 }
-function canonicalKey(cells, occ) {
+function canonicalKey(cells, occ, boardId) {
   const assign = cells.map(([q, r]) => occ.get(q + ',' + r) || '_');
   let best = null;
   for (const perm of symmetries(cells)) {
@@ -191,7 +200,8 @@ function canonicalKey(cells, occ) {
     const k = out.join('|');
     if (best === null || k < best) best = k;
   }
-  return best;
+  // The default board is deliberately unprefixed: its ids predate boards and must not move.
+  return boardId === DEFAULT_BOARD ? best : boardId + '#' + best;
 }
 
 function solutionCode(id) {
@@ -243,29 +253,36 @@ const PIECE_ORIENTATIONS = (() => {
   return out;
 })();
 
-function boardCells() {
+function boardCells(radius) {
   const cells = [];
-  for (let q = -BOARD_RADIUS; q <= BOARD_RADIUS; q++)
-    for (let r = -BOARD_RADIUS; r <= BOARD_RADIUS; r++)
-      if (Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)) <= BOARD_RADIUS) cells.push([q, r]);
+  for (let q = -radius; q <= radius; q++)
+    for (let r = -radius; r <= radius; r++)
+      if (Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)) <= radius) cells.push([q, r]);
   return cells;
 }
 
 // Verify layout is a complete, non-overlapping, on-board tiling and its signature matches `id`.
 function validateSolution(data, env) {
+  // Which board this solution belongs to. Unknown ids are refused rather than assumed, so a
+  // client from a future release cannot have its submission filed under the wrong board.
+  const boardId = typeof data.board === 'string' && data.board ? data.board : DEFAULT_BOARD;
+  const board = BOARDS[boardId];
+  if (!board) return { ok: false, error: 'Unknown board.' };
+
   const layout = data.layout;
   if (!Array.isArray(layout) || layout.length < 1) return { ok: false, error: 'Missing layout.' };
 
-  const cells = boardCells();
+  const cells = boardCells(board.radius);
   const boardSet = new Set(cells.map(([q, r]) => q + ',' + r));
+  const allowed = new Set(board.pieces);
   const occ = new Map();                                  // "q,r" -> piece id
   const used = new Set();
   for (const p of layout) {
     if (!p || typeof p.id !== 'string' || !Array.isArray(p.cells)) return { ok: false, error: 'Malformed layout.' };
-    // Covering the board without overlaps is not enough on its own: without these three
-    // checks any partition of the 61 cells into groups labelled P0..P13 would validate, and
-    // a crafted request could mint an id for a board the game cannot actually produce.
-    if (!PIECE_ORIENTATIONS[p.id]) return { ok: false, error: 'Unknown piece.' };
+    // Covering the board without overlaps is not enough on its own: without these checks any
+    // partition of the cells into groups labelled with piece names would validate, and a
+    // crafted request could mint an id for a board the game cannot actually produce.
+    if (!allowed.has(p.id)) return { ok: false, error: 'That piece is not on this board.' };
     if (used.has(p.id)) return { ok: false, error: 'A piece is used more than once.' };
     used.add(p.id);
     if (!PIECE_ORIENTATIONS[p.id].has(normShape(p.cells))) return { ok: false, error: 'A piece is the wrong shape.' };
@@ -277,25 +294,22 @@ function validateSolution(data, env) {
       occ.set(k, p.id);
     }
   }
-  if (used.size !== Object.keys(PIECE_SHAPES).length) return { ok: false, error: 'Not every piece was used.' };
+  if (used.size !== board.pieces.length) return { ok: false, error: 'Not every piece was used.' };
   if (occ.size !== cells.length) return { ok: false, error: 'The board is not completely filled.' };
 
-  // Rebuild the canonical key the client hashes: the lexicographically smallest of the
-  // filling's 12 orientations, so a pattern and its rotations share one id. This must match
-  // solutionKey() in index.html exactly or every submission fails the signature check.
-  const key = canonicalKey(cells, occ);
+  const key = canonicalKey(cells, occ, boardId);
   const h = cyrb53(key);
   const id = h.toString(36);
   const code = solutionCode(id);
 
-  // Accept the pre-canonicalisation id as well. Players hold cached copies of the page long
-  // after a deploy, and an old client sends the id of the orientation it happens to be in.
-  // The submission is still a valid, verified tiling -- only its labelling is stale -- so it
-  // is accepted and recorded under the canonical id. Without this, every cached client's
-  // submissions would fail, and the worker could not be deployed before the site.
-  const legacyId = cyrb53(cells.map(([q, r]) => occ.get(q + ',' + r)).join('|')).toString(36);
+  // Accept the pre-canonicalisation id as well, for cached clients. That form only ever
+  // existed for the default board, so it is not offered to the others.
+  let legacyId = null;
+  if (boardId === DEFAULT_BOARD) {
+    legacyId = cyrb53(cells.map(([q, r]) => occ.get(q + ',' + r)).join('|')).toString(36);
+  }
   if (typeof data.id === 'string' && data.id !== id && data.id !== legacyId) {
     return { ok: false, error: 'Solution signature mismatch.' };
   }
-  return { ok: true, id, code };
+  return { ok: true, id, code, board: boardId };
 }
