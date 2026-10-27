@@ -42,7 +42,7 @@ BUILT FOR TOUCH
 • Tap a piece to rotate it around the exact hexagon you touched, so it stays where you put it
 • Press and hold for rotate and flip
 • Turn the whole board with the outer ring to see the puzzle from a new angle
-• Overlapping pieces flash red, so a mistake is never hidden
+• Overlapping or overhanging cells flash white, so a mistake is never hidden
 
 TWO BOARDS
 
