@@ -119,30 +119,66 @@ The name feature is entirely optional; the game is fully playable without it.
 
 ---
 
-## Privacy labels / Data safety
+## Data safety (Play Console) — question by question
 
-Both stores ask the same questions in different words. Answers consistent with
-[privacy.html](privacy.html):
+Verified against the app, not just intended: the only outbound requests are a GET for the
+published names and the POST that submits one. There is no analytics, crash-reporting or
+advertising SDK anywhere in the Android build.
+
+### Step 1 — Data collection and security
+
+| Question | Answer | Why |
+|---|---|---|
+| Does your app collect or share any of the required user data types? | **Yes** | The optional solution name |
+| Is all of the user data collected by your app encrypted in transit? | **Yes** | HTTPS to the Worker; the app makes no plaintext requests |
+| Do you provide a way for users to request that their data is deleted? | **Yes** | By email, stated in the privacy policy |
+
+Deletion request URL: `https://donkeyeatsbacon-web.github.io/hexagon-game/privacy.html`
+
+### Step 2 — Data types
+
+Tick exactly one box, under **App activity**:
+
+> **Other user-generated content**
+
+Leave every other category unticked — Location, Personal info, Financial info, Health and
+fitness, Messages, Photos and videos, Audio, Files and docs, Calendar, Contacts, App
+interactions, In-app search history, Installed apps, Web browsing, App info and performance
+(crash logs, diagnostics), and Device or other IDs. None of them are touched: the game has
+no accounts, no identifiers, no analytics and no ads, and it requests only INTERNET and
+VIBRATE.
+
+### Step 3 — Details for "Other user-generated content"
 
 | Question | Answer |
 |---|---|
-| Does the app collect or share user data? | Yes — one optional item |
-| What is collected | "User content" — the optional solution name |
-| Is it linked to the user's identity? | **No** — there are no accounts or identifiers |
-| Is it used for tracking? | **No** |
-| Is it used for advertising or marketing? | **No** |
-| Is collection optional? | **Yes** — the game is fully playable without it |
-| Analytics / crash data | **None** |
-| Device or advertising identifiers | **None** |
-| Location, contacts, photos, camera, microphone | **None** |
+| Collected | **Yes** |
+| Shared | **Yes** — see the note below |
+| Processed ephemerally | **No** — an approved name is stored and published |
+| Required or optional | **Optional** — the game is fully playable without ever submitting one |
+| Purposes | **App functionality** only |
 
-On the IP address: it is visible to the Cloudflare service transiently for rate limiting
-and is not stored with the submission or used to build a profile. Neither store requires
-declaring an IP used purely as an anti-abuse measure and never retained — but if you would
-rather be conservative, declare it under "Diagnostics / App functionality" and say it is
-not linked to identity.
+**Why "Shared" is Yes.** A submitted name is sent to a Cloudflare Worker, which opens an
+issue on a *public* GitHub repository. That issue is world-readable from the moment it is
+created — before any approval, and it stays readable even if the name is rejected and the
+issue closed. An approved name is then published to every player who finds that solution.
+Answering "No" here would be wrong. The privacy policy already says a submission "creates a
+public entry for review", so the two agree.
 
-Account deletion (Apple requirement): **not applicable**, since the app has no accounts.
+### On the IP address
+
+Visible to Cloudflare while a submission is rate-limited, never stored with the name and
+never used to profile anyone. Data used transiently and not retained can be left undeclared,
+and IP is not one of Play's listed data types. If you would rather be conservative, there is
+nowhere natural to put it on this form — the honest place is the privacy policy, where it is
+already described.
+
+### Keep these consistent
+
+The Data safety form, [privacy.html](privacy.html) and the store description all say the
+same thing: no accounts, no ads, no tracking, one optional published name. If you ever add
+analytics or ads, all three have to change together, and the listing line "No advertising.
+No tracking." has to go.
 
 ---
 
