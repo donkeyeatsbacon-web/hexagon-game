@@ -75,7 +75,20 @@ on port 8777:
 ```bash
 npm install -D playwright && npx playwright install chromium
 npm run build && npx http-server www -p 8777    # any static server works
-npm run screenshots                             # -> store-assets/screenshots/
+npm run screenshots        # -> store-assets/screenshots/<device>/NN-scene.png
+```
+
+One folder per device, each matching a single upload slot, and numbered in the order the
+shots should appear on the store page:
+
+```
+store-assets/screenshots/
+  ios-6.7/      1290x2796   iPhone 6.7in      01-board  02-solved  03-collection
+  ios-6.5/      1242x2688   iPhone 6.5in      04-small  05-boards  06-tutorial
+  ios-ipad13/   2048x2732   iPad 12.9in
+  play-phone/   1080x1920   Play phone
+  play-tab7/    1200x1920   Play 7in tablet
+  play-tab10/   1600x2560   Play 10in tablet
 ```
 
 Real captures from a physical device are also fine, and arguably better — the generated ones

@@ -97,6 +97,12 @@ const SCENES = {
 };
 
 mkdirSync(OUT, { recursive: true });
+
+/* Captures go into a folder per device, numbered in the order they should appear on the
+   store page: gameplay first, then the reward, then what accumulates, then the second board.
+   One folder maps to one upload slot, so uploading is a single drag per device. */
+const SCENE_ORDER = ['board', 'solved', 'collection', 'small', 'boards', 'tutorial'];
+const sceneNumber = name => String(SCENE_ORDER.indexOf(name) + 1).padStart(2, '0');
 const SAMPLES = JSON.parse(readFileSync(new URL('../store-assets/sample-solutions.json', import.meta.url), 'utf8'));
 const browser = await chromium.launch();
 
@@ -144,10 +150,12 @@ for (const d of DEVICES) {
       }
     }
 
-    const file = join(OUT, `${d.id}-${name}.png`);
+    const dir = join(OUT, d.id);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${sceneNumber(name)}-${name}.png`);
     await page.screenshot({ path: file, scale: 'device' });
     const box = await page.evaluate(() => [innerWidth, innerHeight]);
-    console.log(`${d.id.padEnd(12)} ${name.padEnd(11)} ${box[0]}x${box[1]} css -> ${d.note}`);
+    console.log(`${d.id.padEnd(12)} ${sceneNumber(name)}-${name.padEnd(11)} ${box[0]}x${box[1]} css -> ${d.note}`);
     await ctx.close();
   }
 }
