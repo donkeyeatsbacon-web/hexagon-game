@@ -26,6 +26,7 @@ const DEVICES = [
   { id: 'ios-6.5',     w: 414,  h: 896,  scale: 3, note: '1242x2688 iPhone 6.5in' },
   { id: 'ios-ipad13',  w: 1024, h: 1366, scale: 2, note: '2048x2732 iPad 12.9in' },
   { id: 'play-phone',  w: 360,  h: 640,  scale: 3, note: '1080x1920 Play phone' },
+  { id: 'play-tab7',   w: 600,  h: 960,  scale: 2, note: '1200x1920 Play 7in tablet' },
   { id: 'play-tab10',  w: 800,  h: 1280, scale: 2, note: '1600x2560 Play 10in tablet' },
 ];
 
